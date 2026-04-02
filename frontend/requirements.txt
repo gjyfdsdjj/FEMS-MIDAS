@@ -1,0 +1,7 @@
+# frontend/requirements.txt
+#
+# streamlit
+# httpx                 # FastAPI 동기 호출
+# plotly                # 차트 (Gantt, 라인, 게이지)
+# pandas
+# python-dotenv

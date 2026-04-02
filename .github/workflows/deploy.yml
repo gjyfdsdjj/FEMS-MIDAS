@@ -1,0 +1,18 @@
+# .github/workflows/deploy.yml
+# GitHub Actions CI/CD 워크플로우
+#
+# trigger: main 브랜치 push
+#
+# jobs:
+#
+#   test:
+#     - Python 3.10 환경 설정
+#     - pip install -r backend/requirements.txt
+#     - pytest backend/tests/ 실행
+#
+#   deploy:
+#     - needs: test
+#     - AWS EC2에 SSH 접속 (GitHub Secrets: EC2_HOST, EC2_KEY)
+#     - git pull origin main
+#     - docker-compose pull && docker-compose up -d --build backend frontend
+#     - 헬스체크: GET /api/v1/health 응답 확인

@@ -1,0 +1,328 @@
+{
+  // ================================================================
+  // MIDAS 더미 데이터
+  // 용도: DB 없이 API 응답 테스트 / 프론트 UI 개발용
+  // 기준 시각: 2026-04-02 10:30 KST
+  // ================================================================
+
+  // ── 공장 현황 (4개 고정) ─────────────────────────────────────────
+  // 각 공장이 서로 다른 상태 — 프론트 UI 모든 케이스 테스트 가능하도록 구성
+  // 공장1: NORMAL / 공장2: SAVING(코스팅) / 공장3: WARNING(온도이탈) / 공장4: MANUAL_STOP
+  "factories": [
+    {
+      "factory_id": 1,               // 1~4 고정값
+      "name": "공장 1",
+      "node_id": "node_A",           // RPi A가 공장1,2 담당
+      "status": "NORMAL",            // NORMAL|SAVING|STOPPED|WARNING|EMERGENCY|MANUAL_STOP
+      "control_mode": "AUTO",        // AUTO|MANUAL
+      "manual_stop": false,          // true면 스케줄러가 절대 재가동하지 않음
+      "temperature_c": -21.4,        // 현재 내부 온도 (-18 목표보다 낮음 = 과냉각 정상)
+      "humidity_pct": 41.2,
+      "pwm_pct": 72,                 // 펠티어 소자 출력 (0~100%)
+      "target_temp_c": -18.0,        // 식품 안전 기준 목표 온도
+      "communication_status": "OK",  // OK|DELAYED|DISCONNECTED
+      "current_schedule_mode": "ON", // ON|OFF|PRECOOL|COASTING|SOLAR_PRIORITY
+      "last_seen_at": "2026-04-02T10:29:58+09:00"
+    },
+    {
+      "factory_id": 2,
+      "name": "공장 2",
+      "node_id": "node_A",
+      "status": "SAVING",            // 절전 모드 (Coasting 운전 중)
+      "control_mode": "AUTO",
+      "manual_stop": false,
+      "temperature_c": -19.8,        // -18.0 근처, 코스팅으로 천천히 유지 중
+      "humidity_pct": 38.5,
+      "pwm_pct": 45,                 // 코스팅이라 출력 낮음
+      "target_temp_c": -18.0,
+      "communication_status": "OK",
+      "current_schedule_mode": "COASTING",
+      "last_seen_at": "2026-04-02T10:29:55+09:00"
+    },
+    {
+      "factory_id": 3,
+      "name": "공장 3",
+      "node_id": "node_B",           // RPi B가 공장3,4 담당
+      "status": "WARNING",           // 온도 이탈 경고 상태
+      "control_mode": "AUTO",
+      "manual_stop": false,
+      "temperature_c": -16.2,        // -18.0 목표 대비 +1.8도 이탈 -> 경고 발생
+      "humidity_pct": 44.1,
+      "pwm_pct": 95,                 // 온도 회복 시도 중, 출력 최대치
+      "target_temp_c": -18.0,
+      "communication_status": "DELAYED", // 통신 지연 (40초)
+      "current_schedule_mode": "ON",
+      "last_seen_at": "2026-04-02T10:29:20+09:00"
+    },
+    {
+      "factory_id": 4,
+      "name": "공장 4",
+      "node_id": "node_B",
+      "status": "MANUAL_STOP",
+      "control_mode": "MANUAL",
+      "manual_stop": true,           // 스케줄러가 절대 건드리지 않음
+      "temperature_c": -14.5,        // 정지 후 온도 상승 중 (위험 주의)
+      "humidity_pct": 52.3,
+      "pwm_pct": 0,                  // 정지 상태
+      "target_temp_c": -18.0,
+      "communication_status": "OK",
+      "current_schedule_mode": "OFF",
+      "last_seen_at": "2026-04-02T10:28:00+09:00"
+    }
+  ],
+
+  // ── 현재 활성 작업 (항상 1개만 존재) ─────────────────────────────
+  "jobs": [
+    {
+      "job_id": "job_20260402_001",        // job_YYYYMMDD_NNN 형식
+      "target_units": 1200,                // 총 목표 생산량
+      "produced_units": 840,               // 현재까지 생산량
+      "remaining_units": 360,              // 잔여 = target - produced
+      "progress_rate": 0.70,               // 진행률 70%
+      "deadline_at": "2026-04-02T23:00:00+09:00",
+      "strategy": "COST_MIN",              // COST_MIN|SAFETY_FIRST|BALANCED
+      "solar_enabled": true,
+      "cold_storage_enabled": true,
+      "dynamic_scheduling_enabled": true,
+      "is_active": true,
+      "created_by": "admin",
+      "created_at": "2026-04-02T08:00:00+09:00"
+    }
+  ],
+
+  // ── 최적화 스케줄 (30분 주기 재계산) ─────────────────────────────
+  "schedules": [
+    {
+      "schedule_id": "sch_20260402_1000",
+      "job_id": "job_20260402_001",
+      "computed_at": "2026-04-02T10:00:00+09:00",
+      "is_applied": true,
+      "estimated_daily_saving_krw": 148000,
+      "estimated_monthly_saving_krw": 1786200,
+      "blocks": [
+        // 공장1: 오전 ON -> 피크 COASTING -> 오후 ON
+        {"factory_id": 1, "start_at": "2026-04-02T10:00:00+09:00", "end_at": "2026-04-02T12:00:00+09:00", "mode": "ON",       "target_temp_c": -18.0, "expected_grid_kwh": 3.2, "expected_solar_kwh": 1.1, "reason": "BASE_LOAD"},
+        {"factory_id": 1, "start_at": "2026-04-02T12:00:00+09:00", "end_at": "2026-04-02T15:00:00+09:00", "mode": "COASTING", "target_temp_c": -18.0, "expected_grid_kwh": 0.8, "expected_solar_kwh": 1.8, "reason": "PEAK_AVOID"},
+        {"factory_id": 1, "start_at": "2026-04-02T15:00:00+09:00", "end_at": "2026-04-02T23:00:00+09:00", "mode": "ON",       "target_temp_c": -18.0, "expected_grid_kwh": 3.5, "expected_solar_kwh": 0.2, "reason": "BASE_LOAD"},
+        // 공장2: 태양광 있는 낮 COASTING -> 이후 ON
+        {"factory_id": 2, "start_at": "2026-04-02T10:00:00+09:00", "end_at": "2026-04-02T14:00:00+09:00", "mode": "COASTING", "target_temp_c": -18.0, "expected_grid_kwh": 1.0, "expected_solar_kwh": 1.5, "reason": "SOLAR_PRIORITY"},
+        {"factory_id": 2, "start_at": "2026-04-02T14:00:00+09:00", "end_at": "2026-04-02T23:00:00+09:00", "mode": "ON",       "target_temp_c": -18.0, "expected_grid_kwh": 3.0, "expected_solar_kwh": 0.3, "reason": "BASE_LOAD"},
+        // 공장3: WARNING 온도 회복 우선, 종일 ON (TEMP_RECOVERY)
+        {"factory_id": 3, "start_at": "2026-04-02T10:00:00+09:00", "end_at": "2026-04-02T23:00:00+09:00", "mode": "ON",       "target_temp_c": -18.0, "expected_grid_kwh": 4.0, "expected_solar_kwh": 0.0, "reason": "TEMP_RECOVERY"}
+        // 공장4: manual_stop=true 이므로 블록 없음
+      ]
+    }
+  ],
+
+  // ── 센서 로그 (최근 20분, 5분 간격 샘플) ─────────────────────────
+  // 실제 운영 시에는 초 단위로 쌓임
+  "sensor_logs": [
+    // 공장1: 정상 냉각 중, 온도 서서히 하강
+    {"factory_id": 1, "temperature_c": -21.0, "humidity_pct": 40.5, "pwm_pct": 70, "status": "NORMAL",      "power_source": "GRID",  "timestamp": "2026-04-02T10:00:00+09:00"},
+    {"factory_id": 1, "temperature_c": -21.1, "humidity_pct": 40.8, "pwm_pct": 71, "status": "NORMAL",      "power_source": "SOLAR", "timestamp": "2026-04-02T10:05:00+09:00"},
+    {"factory_id": 1, "temperature_c": -21.3, "humidity_pct": 41.0, "pwm_pct": 72, "status": "NORMAL",      "power_source": "SOLAR", "timestamp": "2026-04-02T10:10:00+09:00"},
+    {"factory_id": 1, "temperature_c": -21.4, "humidity_pct": 41.2, "pwm_pct": 72, "status": "NORMAL",      "power_source": "SOLAR", "timestamp": "2026-04-02T10:15:00+09:00"},
+    // 공장2: COASTING, PWM 낮고 온도 완만히 상승 (축냉 소모 중)
+    {"factory_id": 2, "temperature_c": -20.1, "humidity_pct": 38.0, "pwm_pct": 50, "status": "SAVING",      "power_source": "GRID",  "timestamp": "2026-04-02T10:00:00+09:00"},
+    {"factory_id": 2, "temperature_c": -20.0, "humidity_pct": 38.2, "pwm_pct": 48, "status": "SAVING",      "power_source": "SOLAR", "timestamp": "2026-04-02T10:05:00+09:00"},
+    {"factory_id": 2, "temperature_c": -19.9, "humidity_pct": 38.4, "pwm_pct": 46, "status": "SAVING",      "power_source": "SOLAR", "timestamp": "2026-04-02T10:10:00+09:00"},
+    {"factory_id": 2, "temperature_c": -19.8, "humidity_pct": 38.5, "pwm_pct": 45, "status": "SAVING",      "power_source": "SOLAR", "timestamp": "2026-04-02T10:15:00+09:00"},
+    // 공장3: 온도 이탈 진행 중, PWM 최대로 올렸지만 아직 회복 안됨
+    {"factory_id": 3, "temperature_c": -17.8, "humidity_pct": 43.5, "pwm_pct": 90, "status": "WARNING",     "power_source": "GRID",  "timestamp": "2026-04-02T10:00:00+09:00"},
+    {"factory_id": 3, "temperature_c": -17.2, "humidity_pct": 43.8, "pwm_pct": 92, "status": "WARNING",     "power_source": "GRID",  "timestamp": "2026-04-02T10:05:00+09:00"},
+    {"factory_id": 3, "temperature_c": -16.8, "humidity_pct": 44.0, "pwm_pct": 94, "status": "WARNING",     "power_source": "GRID",  "timestamp": "2026-04-02T10:10:00+09:00"},
+    {"factory_id": 3, "temperature_c": -16.2, "humidity_pct": 44.1, "pwm_pct": 95, "status": "WARNING",     "power_source": "GRID",  "timestamp": "2026-04-02T10:15:00+09:00"},
+    // 공장4: 수동 정지, PWM 0이라 온도 계속 상승 (위험 주의)
+    {"factory_id": 4, "temperature_c": -18.0, "humidity_pct": 50.0, "pwm_pct":  0, "status": "MANUAL_STOP", "power_source": "GRID",  "timestamp": "2026-04-02T10:00:00+09:00"},
+    {"factory_id": 4, "temperature_c": -17.2, "humidity_pct": 50.8, "pwm_pct":  0, "status": "MANUAL_STOP", "power_source": "GRID",  "timestamp": "2026-04-02T10:05:00+09:00"},
+    {"factory_id": 4, "temperature_c": -16.1, "humidity_pct": 51.5, "pwm_pct":  0, "status": "MANUAL_STOP", "power_source": "GRID",  "timestamp": "2026-04-02T10:10:00+09:00"},
+    {"factory_id": 4, "temperature_c": -14.5, "humidity_pct": 52.3, "pwm_pct":  0, "status": "MANUAL_STOP", "power_source": "GRID",  "timestamp": "2026-04-02T10:15:00+09:00"}
+  ],
+
+  // ── 알림 ─────────────────────────────────────────────────────────
+  "alerts": [
+    {
+      "alert_id": "alt_001",
+      "factory_id": 3,
+      "level": "WARNING",
+      "type": "TEMP_DEVIATION",       // 온도 이탈 (임계값: 목표 대비 +-2도)
+      "message": "공장 3 온도가 목표 범위를 벗어났습니다. 현재 -16.2도C (목표 -18.0도C)",
+      "is_acknowledged": false,
+      "acknowledged_by": null,
+      "created_at": "2026-04-02T10:12:00+09:00"
+    },
+    {
+      "alert_id": "alt_002",
+      "factory_id": 3,
+      "level": "WARNING",
+      "type": "COMM_DELAYED",         // 통신 지연 (30초 초과)
+      "message": "공장 3 통신 지연 감지. 마지막 수신 40초 전.",
+      "is_acknowledged": false,
+      "acknowledged_by": null,
+      "created_at": "2026-04-02T10:20:00+09:00"
+    },
+    {
+      "alert_id": "alt_003",
+      "factory_id": 4,
+      "level": "INFO",
+      "type": "MANUAL_STOP",          // 수동 정지 알림
+      "message": "공장 4 수동 정지 처리됨. 요청자: admin",
+      "is_acknowledged": true,        // 이미 확인 처리됨
+      "acknowledged_by": "admin",
+      "created_at": "2026-04-02T09:45:00+09:00"
+    }
+  ],
+
+  // ── 수동 제어 이력 ───────────────────────────────────────────────
+  "control_logs": [
+    {
+      "id": 1,
+      "factory_id": 4,
+      "action": "STOP",
+      "value": null,                  // STOP은 value 없음
+      "reason": "시연용 수동 정지",
+      "requested_by": "admin",
+      "result": "accepted",           // accepted|failed
+      "issued_at": "2026-04-02T09:44:00+09:00"
+    },
+    {
+      "id": 2,
+      "factory_id": 2,
+      "action": "SET_PWM",
+      "value": 45,                    // PWM 45%로 설정
+      "reason": "코스팅 테스트",
+      "requested_by": "admin",
+      "result": "accepted",
+      "issued_at": "2026-04-02T10:00:00+09:00"
+    }
+  ],
+
+  // ── 차트 데이터 ──────────────────────────────────────────────────
+  "charts": {
+    // 시간대별 전력 비용 비교 (원 단위)
+    // before: 최적화 없을 때 / after: 최적화 후 / solar: 태양광 기여분
+    "hourly": {
+      "labels": ["00","01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","17","18","19","20","21","22","23"],
+      "before_optimization": [12000,11500,11000,10800,10500,10200,11000,13000,15000,16000,17000,18000,19000,18500,18000,17000,16000,15000,14000,13500,13000,12500,12000,11800],
+      "after_optimization":  [ 9000, 8500, 8000, 7800, 7500, 7200, 8000,10000,12000,12500,13000,11000, 9000, 8800, 9000,12000,13000,12500,12000,11500,11000,10500,10000, 9800],
+      "solar_contribution":  [    0,    0,    0,    0,    0,    0,    0,    0,  200,  600, 1100, 1500, 1800, 1700, 1600, 1200,  800,  400,  100,    0,    0,    0,    0,    0]
+    },
+    // 일간 절감액 추이 (최근 7일, 원 단위)
+    "savings_daily": {
+      "labels": ["03-27","03-28","03-29","03-30","03-31","04-01","04-02"],
+      "values": [142000, 138000, 151000, 148000, 155000, 149000, 148000]
+    },
+    // 월간 절감액 누적 (원 단위)
+    "savings_monthly": {
+      "labels": ["2026-01","2026-02","2026-03"],
+      "values": [1650000, 1720000, 1786200]
+    }
+  },
+
+  // ── 대시보드 KPI 요약 ─────────────────────────────────────────────
+  "dashboard_summary": {
+    "current_time": "2026-04-02T10:30:00+09:00",
+    "running_factories": 3,                   // 공장4 제외 (manual_stop)
+    "total_factories": 4,
+    "target_units": 1200,
+    "produced_units": 840,
+    "remaining_units": 360,
+    "progress_rate": 0.70,
+    "current_tou_price_krw_per_kwh": 180,     // 현재 피크 요금대
+    "estimated_daily_saving_krw": 148000,
+    "estimated_monthly_saving_krw": 1786200,
+    "carbon_reduction_tco2_year": 39.5,       // 연간 탄소 감축량 (tCO2e)
+    "risk_index": 42,                         // 0~100, 80 초과 시 화면 적색
+    "risk_level": "MEDIUM",                   // LOW|MEDIUM|HIGH
+    "control_mode": "AUTO",
+    "communication_status": "DELAYED"         // 공장3 지연으로 전체 DELAYED
+  },
+
+  // ── 시스템 상태 (상단 상태바용) ───────────────────────────────────
+  "system_status": {
+    "control_mode": "AUTO",
+    "communication_status": "DELAYED",
+    "risk_index": 42,
+    "risk_level": "MEDIUM",
+    "active_factories": 3,
+    "scheduler_last_run_at": "2026-04-02T10:00:00+09:00",    // 30분 주기 마지막 실행
+    "weather_weights_updated_at": "2026-04-02T18:00:02+09:00"
+  },
+
+  // ── 환경 가중치 (기상청 API 기반, 매일 18시 갱신) ─────────────────
+  "environment_weights": {
+    "date": "2026-04-03",                     // 내일 예측 기준
+    "w_temp": 1.0,                            // 평년 수준 (폭염이면 1.2)
+    "w_solar": 0.5,                           // 흐린 날 (맑으면 1.0, 비면 0.2)
+    "max_temp_forecast_c": 18,                // 내일 최고기온
+    "weather_condition": "CLOUDY",            // CLEAR|CLOUDY|RAINY
+    "updated_at": "2026-04-02T18:00:00+09:00"
+  },
+
+  // ── TOU 요금 구간 ─────────────────────────────────────────────────
+  "pricing_tou": {
+    "current_price_krw_per_kwh": 180,
+    "slots": [
+      {"start_hour": 22, "end_hour":  8, "price": 100, "label": "심야 (저렴) - 축냉 타임"},
+      {"start_hour":  8, "end_hour": 10, "price": 140, "label": "중간"},
+      {"start_hour": 10, "end_hour": 16, "price": 180, "label": "피크 (비쌈) - Coasting 타임"},
+      {"start_hour": 16, "end_hour": 22, "price": 160, "label": "중간"}
+    ]
+  },
+
+  // ── 온도 예측 (Prophet 모델 샘플, 향후 4시간) ─────────────────────
+  "predict_temperature": [
+    {"factory_id": 1, "timestamp": "2026-04-02T11:00:00+09:00", "predicted_temperature_c": -21.5, "lower_bound_c": -22.1, "upper_bound_c": -20.9},
+    {"factory_id": 1, "timestamp": "2026-04-02T12:00:00+09:00", "predicted_temperature_c": -20.8, "lower_bound_c": -21.5, "upper_bound_c": -20.1},
+    {"factory_id": 1, "timestamp": "2026-04-02T13:00:00+09:00", "predicted_temperature_c": -19.5, "lower_bound_c": -20.2, "upper_bound_c": -18.8},
+    {"factory_id": 1, "timestamp": "2026-04-02T14:00:00+09:00", "predicted_temperature_c": -18.5, "lower_bound_c": -19.2, "upper_bound_c": -17.8}
+  ],
+
+  // ── 태양광 발전량 예측 (오늘 일출~일몰) ──────────────────────────
+  "predict_solar": [
+    {"timestamp": "2026-04-02T08:00:00+09:00", "predicted_solar_kwh": 0.1},
+    {"timestamp": "2026-04-02T09:00:00+09:00", "predicted_solar_kwh": 0.6},
+    {"timestamp": "2026-04-02T10:00:00+09:00", "predicted_solar_kwh": 1.1},
+    {"timestamp": "2026-04-02T11:00:00+09:00", "predicted_solar_kwh": 1.5},
+    {"timestamp": "2026-04-02T12:00:00+09:00", "predicted_solar_kwh": 1.8},  // 최대 발전량
+    {"timestamp": "2026-04-02T13:00:00+09:00", "predicted_solar_kwh": 1.7},
+    {"timestamp": "2026-04-02T14:00:00+09:00", "predicted_solar_kwh": 1.6},
+    {"timestamp": "2026-04-02T15:00:00+09:00", "predicted_solar_kwh": 1.2},
+    {"timestamp": "2026-04-02T16:00:00+09:00", "predicted_solar_kwh": 0.8},
+    {"timestamp": "2026-04-02T17:00:00+09:00", "predicted_solar_kwh": 0.4},
+    {"timestamp": "2026-04-02T18:00:00+09:00", "predicted_solar_kwh": 0.1}
+  ],
+
+  // ── 예지 보전 진단 (Isolation Forest + Prophet 결합) ─────────────
+  // health_score: 1.0=완전정상 / 0.6 이하=주의 / 0.4 이하=교체 권고
+  "predict_maintenance": [
+    {
+      "factory_id": 1,
+      "health_score": 0.92,
+      "maintenance_risk": "LOW",
+      "reason": "정상 효율 범위 내 운전 중",
+      "recommended_action": "이상 없음"
+    },
+    {
+      "factory_id": 2,
+      "health_score": 0.81,
+      "maintenance_risk": "LOW",
+      "reason": "정상 효율 범위 내 운전 중",
+      "recommended_action": "이상 없음"
+    },
+    {
+      "factory_id": 3,
+      "health_score": 0.58,              // 0.6 이하 -> MEDIUM 경고
+      "maintenance_risk": "MEDIUM",
+      "reason": "전력 대비 온도 하강 효율 저하 감지 (정상 대비 -23%)",
+      "recommended_action": "펠티어 소자 점검 권고"
+    },
+    {
+      "factory_id": 4,
+      "health_score": 0.75,
+      "maintenance_risk": "LOW",
+      "reason": "수동 정지 상태, 마지막 가동 데이터 기준 정상",
+      "recommended_action": "재가동 후 재진단 필요"
+    }
+  ]
+}
