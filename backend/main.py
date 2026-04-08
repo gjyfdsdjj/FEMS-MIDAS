@@ -14,10 +14,12 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from database.connection import engine, create_all_tables
 from mqtt.subscriber import MQTTSubscriber
+from routers.readonly import router as readonly_router # readonly QR 조회 라우터 import
 
 app = FastAPI()
 mqtt_subscriber: MQTTSubscriber = None
 
+app.include_router(readonly_router) # /api/v1/readonly/* 엔드포인트 등록
 
 @app.on_event("startup")
 async def startup():
