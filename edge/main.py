@@ -42,6 +42,7 @@ def main():
                         factory_id,
                         data["temperature_c"],
                         data["humidity_pct"],
+                        data["measured_at"],
                     )
                 else:
                     print(f"공장 {factory_id} 센서 읽기 실패, 건너뜀")

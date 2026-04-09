@@ -1,7 +1,6 @@
 import json
 import os
 import paho.mqtt.client as mqtt
-from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -43,13 +42,13 @@ class EdgeMQTTClient:
         except Exception as e:
             print(f"명령 처리 오류: {e}")
 
-    def publish_telemetry(self, factory_id: int, temperature_c: float, humidity_pct: float):
+    def publish_telemetry(self, factory_id: int, temperature_c: float, humidity_pct: float, measured_at: str):
         payload = {
             "factory_id": factory_id,
             "node_id": self.node_id,
             "temperature_c": round(temperature_c, 2),
             "humidity_pct": round(humidity_pct, 2),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": measured_at,
         }
         topic = f"factory/{self.node_id}/{factory_id}/telemetry"
         self.client.publish(topic, json.dumps(payload), qos=1)

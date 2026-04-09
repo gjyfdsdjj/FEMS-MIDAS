@@ -2,6 +2,7 @@ import json
 import asyncio
 import os
 import paho.mqtt.client as mqtt
+from datetime import datetime
 from database.connection import AsyncSessionLocal
 from database.models import SensorLog
 
@@ -41,11 +42,14 @@ class MQTTSubscriber:
     async def _save(self, payload):
         try:
             async with AsyncSessionLocal() as session:
+                ts_raw = payload.get("timestamp")
+                measured_at = datetime.fromisoformat(ts_raw) if ts_raw else None
                 log = SensorLog(
                     factory_id=payload["factory_id"],
                     node_id=payload.get("node_id"),
                     temperature_c=payload.get("temperature_c"),
                     humidity_pct=payload.get("humidity_pct"),
+                    measured_at=measured_at,
                 )
                 session.add(log)
                 await session.commit()

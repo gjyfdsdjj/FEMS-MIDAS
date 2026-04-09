@@ -11,4 +11,5 @@ class SensorLog(Base):
     node_id = Column(String(20))
     temperature_c = Column(Numeric(5, 2))
     humidity_pct = Column(Numeric(5, 2))
+    measured_at = Column(DateTime(timezone=True))
     logged_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
