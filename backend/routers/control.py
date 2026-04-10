@@ -1,22 +1,46 @@
-# backend/routers/control.py
-# 수동 제어 엔드포인트 (admin 전용)
-#
-# POST /api/v1/control/manual
-#   - 권한: admin
-#   - action: START | STOP | RESET | SET_PWM | SET_TARGET_TEMP | SWITCH_AUTO | SWITCH_MANUAL
-#   - STOP 시 manual_stop=True 플래그 설정 → 자동 스케줄러가 재가동 금지
-#   - MQTT publisher로 command 발행
-#   - control_logs 테이블 기록
-#
-# POST /api/v1/control/all-stop
-#   - 권한: admin
-#   - 전체 긴급 정지, 4개 공장 일괄 MQTT STOP 발행
-#
-# POST /api/v1/control/all-start
-#   - 권한: admin
-#   - manual_stop=True 공장은 제외하고 재가동
-#
-# GET /api/v1/control/logs
-#   - 권한: admin
-#   - Query: factory_id?, limit?, cursor?
-#   - 수동 제어 이력 커서 페이지네이션
+from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import Optional
+from mqtt.publisher import MQTTPublisher
+
+router = APIRouter(prefix="/api/v1/control", tags=["control"])
+
+publisher = MQTTPublisher()
+publisher.connect()
+
+
+class ManualControlRequest(BaseModel):
+    node_id: str
+    factory_id: int
+    action: str  # START | STOP | SET_PWM | SET_TARGET_TEMP | SWITCH_AUTO | SWITCH_MANUAL
+    value: Optional[float] = None
+    reason: Optional[str] = ""
+
+
+class AllStopRequest(BaseModel):
+    node_ids: list[str]
+    reason: Optional[str] = ""
+
+
+@router.post("/manual")
+async def manual_control(req: ManualControlRequest):
+    payload = {}
+    if req.value is not None:
+        payload["value"] = req.value
+    if req.reason:
+        payload["reason"] = req.reason
+
+    publisher.publish_command(req.node_id, req.factory_id, req.action, payload)
+    return {"success": True, "message": f"{req.action} 명령 발행 완료"}
+
+
+@router.post("/all-stop")
+async def all_stop(req: AllStopRequest):
+    publisher.publish_all_stop(req.node_ids, req.reason)
+    return {"success": True, "message": "전체 긴급 정지 명령 발행 완료"}
+
+
+@router.post("/all-start")
+async def all_start(req: AllStopRequest):
+    publisher.publish_all_start(req.node_ids, req.reason)
+    return {"success": True, "message": "전체 재가동 명령 발행 완료"}

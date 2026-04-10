@@ -11,15 +11,32 @@ load_dotenv()
 sys.path.insert(0, os.path.dirname(__file__))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from database.connection import engine, create_all_tables
 from mqtt.subscriber import MQTTSubscriber
-from routers.readonly import router as readonly_router # readonly QR 조회 라우터 import
+from routers.readonly import router as readonly_router
+from routers.control import router as control_router
 
 app = FastAPI()
 mqtt_subscriber: MQTTSubscriber = None
 
-app.include_router(readonly_router) # /api/v1/readonly/* 엔드포인트 등록
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+app.include_router(readonly_router)
+app.include_router(control_router)
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "favicon.ico"))
 
 @app.on_event("startup")
 async def startup():
