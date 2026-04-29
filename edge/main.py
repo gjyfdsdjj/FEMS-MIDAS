@@ -35,6 +35,7 @@ def main():
 
     try:
         while running:
+            mqtt.reconnect_if_needed()
             for factory_id in FACTORY_IDS:
                 data = sensors[factory_id].read()
                 if data:
