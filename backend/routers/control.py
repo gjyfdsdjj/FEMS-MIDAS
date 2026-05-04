@@ -1,12 +1,9 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
-from mqtt.publisher import MQTTPublisher
+from mqtt.publisher import publisher
 
 router = APIRouter(prefix="/api/v1/control", tags=["control"])
-
-publisher = MQTTPublisher()
-publisher.connect()
 
 
 class ManualControlRequest(BaseModel):

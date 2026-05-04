@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from database.connection import engine, create_all_tables
 from mqtt.subscriber import MQTTSubscriber
+from mqtt.publisher import publisher
 from routers.readonly import router as readonly_router
 from routers.control import router as control_router
 from routers.weather import router as weather_router
@@ -60,6 +61,13 @@ async def startup():
         print(f"❌ DB 연결 실패: {e}")
         return
 
+    # MQTT publisher 연결
+    try:
+        publisher.connect()
+        print("✅ MQTT publisher 연결 성공")
+    except Exception as e:
+        print(f"⚠️ MQTT publisher 연결 실패 (브로커 없이 계속): {e}")
+
     # MQTT 구독 시작
     loop = asyncio.get_event_loop()
     mqtt_subscriber = MQTTSubscriber(loop)
@@ -68,6 +76,7 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    publisher.disconnect()
     if mqtt_subscriber:
         mqtt_subscriber.stop()
         print("MQTT 연결 종료")

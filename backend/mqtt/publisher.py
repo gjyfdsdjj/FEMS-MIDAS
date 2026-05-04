@@ -39,3 +39,6 @@ class MQTTPublisher:
         for node_id in node_ids:
             for factory_id in range(1, 5):
                 self.publish_command(node_id, factory_id, "START", {"reason": reason})
+
+
+publisher = MQTTPublisher()

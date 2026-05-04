@@ -52,8 +52,9 @@ DB/MQTT/실예측이 없는 환경에서도 더미 데이터로 1회 실행 검�
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import importlib
 import json
 from pathlib import Path
@@ -508,6 +509,38 @@ def _run_optimization_with_fallback(ctx: JobAContext) -> list[dict[str, Any]]:
     return _heuristic_blocks(ctx)
 
 
+async def _save_blocks_to_db(blocks: list[dict[str, Any]]) -> None:
+    """최적화 블록을 schedules 테이블에 저장한다. 기존 미래 슬롯은 먼저 삭제."""
+    try:
+        from backend.database.connection import AsyncSessionLocal
+        from backend.database.models import Schedule
+        from sqlalchemy import delete
+    except Exception:
+        from database.connection import AsyncSessionLocal
+        from database.models import Schedule
+        from sqlalchemy import delete
+
+    now = datetime.now(timezone.utc)
+    factory_ids = [int(b["factory_id"]) for b in blocks]
+
+    async with AsyncSessionLocal() as session:
+        # 같은 공장의 미래 슬롯 삭제 (중복 방지)
+        await session.execute(
+            delete(Schedule)
+            .where(Schedule.factory_id.in_(factory_ids))
+            .where(Schedule.start_at >= now)
+        )
+        for block in blocks:
+            session.add(Schedule(
+                factory_id=int(block["factory_id"]),
+                target_temp=block.get("recommended_temp_c", block.get("target_temp_c")),
+                mode=block.get("mode"),
+                start_at=datetime.fromisoformat(block["start_at"]),
+                end_at=datetime.fromisoformat(block["end_at"]),
+            ))
+        await session.commit()
+
+
 def run_job_a_optimization(
     *,
     now: datetime | None = None,
@@ -628,9 +661,36 @@ def run_job_a_optimization(
     if optimization_debug:
         result["optimization_debug"] = optimization_debug
 
-    # 데모 단계: dry_run=False일 때만 추후 MQTT 발행 지점으로 사용
-    if not dry_run:
-        result["publish_status"] = "PENDING_MQTT_INTEGRATION"
+    if not dry_run and blocks:
+        try:
+            asyncio.run(_save_blocks_to_db(blocks))
+            result["db_saved"] = True
+        except Exception as e:
+            result["db_saved"] = False
+            result["db_error"] = str(e)
+
+        try:
+            from backend.mqtt.publisher import publisher
+        except Exception:
+            from mqtt.publisher import publisher
+
+        node_id = os.getenv("NODE_ID", "node_A")
+        published = 0
+        for block in blocks:
+            try:
+                publisher.publish_command(
+                    node_id,
+                    int(block["factory_id"]),
+                    "SET_TARGET_TEMP",
+                    {
+                        "value": block.get("recommended_temp_c", block.get("target_temp_c")),
+                        "start_at": block.get("start_at"),
+                    },
+                )
+                published += 1
+            except Exception as e:
+                print(f"MQTT 발행 실패 factory={block.get('factory_id')}: {e}")
+        result["mqtt_published"] = published
 
     _LAST_JOB_A_RESULT = result
     _JOB_A_LOGS.append(result)
@@ -673,6 +733,7 @@ def configure_scheduler_jobs() -> Any:
         minute="*/30",
         id="job_a_optimization",
         replace_existing=True,
+        kwargs={"dry_run": False},
     )
 
     scheduler.add_job(
