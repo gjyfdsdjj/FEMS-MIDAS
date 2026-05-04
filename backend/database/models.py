@@ -56,6 +56,17 @@ class Job(Base):
     quantity = Column(BigInteger)
 
 
+class PowerLog(Base):
+    __tablename__ = "power_logs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    factory_id = Column(BigInteger, nullable=False)
+    node_id = Column(String(20))
+    power_w = Column(Float, nullable=False)       # 실측 전력 (W)
+    measured_at = Column(DateTime(timezone=True))
+    logged_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class SensorLog(Base):
     __tablename__ = "sensor_logs"
 

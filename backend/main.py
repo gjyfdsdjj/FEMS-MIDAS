@@ -20,6 +20,7 @@ from mqtt.subscriber import MQTTSubscriber
 from routers.readonly import router as readonly_router
 from routers.control import router as control_router
 from routers.weather import router as weather_router
+from routers.energy import router as energy_router
 from routers.operations import router as operations_router
 
 app = FastAPI()
@@ -36,6 +37,7 @@ app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__
 app.include_router(readonly_router)
 app.include_router(control_router)
 app.include_router(weather_router)
+app.include_router(energy_router)
 app.include_router(operations_router)
 
 @app.get("/favicon.ico", include_in_schema=False)
