@@ -3,6 +3,14 @@ import plotly.graph_objects as go
 
 
 def temp_chart(data):
+    times = data["times"]
+    temps = data["temps"]
+    if not times or not temps:
+        return
+
+    tick_indices = sorted({0, len(times) // 4, len(times) // 2, (len(times) * 3) // 4})
+    tick_indices = [idx for idx in tick_indices if idx < len(times)]
+
     fig = go.Figure()
 
     fig.add_hrect(
@@ -25,8 +33,8 @@ def temp_chart(data):
     )
 
     fig.add_trace(go.Scatter(
-        x=data["times"],
-        y=data["temps"],
+        x=times,
+        y=temps,
         mode="lines",
         line=dict(color="#0077cc", width=2.5, shape="spline"),
         fill="tozeroy",
@@ -36,8 +44,8 @@ def temp_chart(data):
     ))
 
     fig.add_trace(go.Scatter(
-        x=[data["times"][-1]],
-        y=[data["temps"][-1]],
+        x=[times[-1]],
+        y=[temps[-1]],
         mode="markers",
         marker=dict(color="#0077cc", size=9, line=dict(color="#ffffff", width=2)),
         showlegend=False,
@@ -56,13 +64,8 @@ def temp_chart(data):
             showline=False,
             ticks="",
             tickmode="array",
-            tickvals=[
-                data["times"][0],
-                data["times"][6],
-                data["times"][12],
-                data["times"][18],
-            ],
-            ticktext=["00시", "06시", "12시", "18시"],
+            tickvals=[times[idx] for idx in tick_indices],
+            ticktext=[times[idx].strftime("%H시") for idx in tick_indices],
             tickfont=dict(size=9, color="#6b8299"),
         ),
         yaxis=dict(
