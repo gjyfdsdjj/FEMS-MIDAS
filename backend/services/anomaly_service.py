@@ -18,8 +18,8 @@
 #   alert_service.create_alert에서 사용할 수 있는 형태로 이상 감지 결과 생성
 #
 
-from datetime import datetime, timedelta
-from backend.repositories.sensor_log_repository import get_latest_sensor_logs
+from datetime import datetime
+from backend.repositories.sensor_log_repository import get_latest_sensor_logs, get_sensor_logs_before_5_minutes
 from backend.repositories.factory_repository import get_factory_last_seen_times
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,23 +57,6 @@ def check_temperature_range(sensor_log):
 
     return None
 
-async def test_temperature_range_with_db(db: AsyncSession):
-    latest_sensor_logs = await get_latest_sensor_logs(db)
-
-    detected_alerts = []
-
-    for sensor_log in latest_sensor_logs:
-        result = check_temperature_range(sensor_log)
-        if result:
-            detected_alerts.append(result)
-
-    return {
-        "success": True,
-        "checked_count": len(latest_sensor_logs),
-        "alerts_created": len(detected_alerts),
-        "alerts": detected_alerts,
-    }
-
 def check_temperature_spike(current_sensor_log, old_sensor_log):
     if old_sensor_log is None:
         return None
@@ -108,7 +91,7 @@ def check_communication_timeout(factory):
             f"{factory_id}번 공장 센서 수신 시간이 없습니다."
         )
     
-    now = datetime.now()
+    now = datetime.now(last_seen_at.tzinfo)
     elapsed_sec = (now - last_seen_at).total_seconds() # 경과 시간
 
     if elapsed_sec >= COMMUNICATION_TIMEOUT_SEC:
@@ -122,29 +105,24 @@ def check_communication_timeout(factory):
     return None
 
 
-def run_anomaly_monitoring() -> dict:
+async def run_anomaly_monitoring(db: AsyncSession) -> dict:
     '''
     Job C에서 1분마다 호출할 이상 감지 총괄 함수
-    현재는 더미 데이터로 감지 로직만 실행 
+
+    DB 데이터 기반으로 3가지 이상 현상 감지
+    - TEMP_RANGE_OUT: 공장별 최신 센서 로그 기준 온도 범위 이탈
+    - TEMP_SPIKE: 공장별 최신 로그와 5분 전 로그의 온도 차이
+    - COMMUNICATION_TIMEOUT: factories.last_seen_at 기준 센서 수신 지연
     '''
 
-    latest_sensor_logs = [
-        {"factory_id": 1, "temperature_c": -21.40},
-        {"factory_id": 3, "temperature_c": -16.20},
-        {"factory_id": 4, "temperature_c": -14.50},
-    ]
+    latest_sensor_logs = await get_latest_sensor_logs(db)
+    sensor_logs_before_5_minutes = await get_sensor_logs_before_5_minutes(db)
+    factory_last_seen_times = await get_factory_last_seen_times(db)
 
-    old_sensor_logs_by_factory = {
-        1: {"factory_id": 1, "temperature_c": -20.0},
-        3: {"factory_id": 3, "temperature_c": -17.0},
-        4: {"factory_id": 4, "temperature_c": -20.0},
+    sensor_logs_before_5_minutes_by_factory = {
+        row["factory_id"]: row 
+        for row in sensor_logs_before_5_minutes
     }
-
-    factories = [
-        {"factory_id": 1, "last_seen_at": datetime.now() - timedelta(seconds=30)},
-        {"factory_id": 3, "last_seen_at": datetime.now() - timedelta(seconds=240)},
-        {"factory_id": 4, "last_seen_at": datetime.now() - timedelta(seconds=10)},
-    ]
 
     detected_alerts = []
 
@@ -155,27 +133,21 @@ def run_anomaly_monitoring() -> dict:
         if range_result:
             detected_alerts.append(range_result)
 
-        old_sensor_log = old_sensor_logs_by_factory.get(factory_id)
+        sensor_log_before_5_minutes = sensor_logs_before_5_minutes_by_factory.get(factory_id)
 
-        spike_result = check_temperature_spike(sensor_log, old_sensor_log)
+        spike_result = check_temperature_spike(sensor_log, sensor_log_before_5_minutes)
         if spike_result:
             detected_alerts.append(spike_result)
     
-    for factory in factories:
-        timeout_result = check_communication_timeout(factory)
+    for factory_last_seen in factory_last_seen_times:
+        timeout_result = check_communication_timeout(factory_last_seen)
         if timeout_result:
             detected_alerts.append(timeout_result)
 
     return {
         "success": True,
-        "checked_count": len(latest_sensor_logs) + len(factories),
+        "checked_count": len(latest_sensor_logs) + len(factory_last_seen_times),
         "alerts_created": len(detected_alerts),
         "alerts": detected_alerts,
         "message": "anomaly monitoring executed",
     }
-
-# 임시 테스트용
-if __name__ == "__main__":
-
-    print("\n=== Job C 총괄 함수 테스트 ===")
-    print(run_anomaly_monitoring())
