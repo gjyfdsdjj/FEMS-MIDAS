@@ -20,6 +20,7 @@
 
 from datetime import datetime, timedelta
 from backend.repositories.sensor_log_repository import get_latest_sensor_logs
+from backend.repositories.factory_repository import get_factory_last_seen_times
 from sqlalchemy.ext.asyncio import AsyncSession
 
 TEMP_MIN_C = -22.0
