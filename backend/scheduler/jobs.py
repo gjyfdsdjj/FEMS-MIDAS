@@ -513,24 +513,32 @@ async def _save_blocks_to_db(blocks: list[dict[str, Any]]) -> None:
     """최적화 블록을 schedules 테이블에 저장한다. 기존 미래 슬롯은 먼저 삭제."""
     try:
         from backend.database.connection import AsyncSessionLocal
-        from backend.database.models import Schedule
-        from sqlalchemy import delete
+        from backend.database.models import Schedule, Factory
+        from sqlalchemy import delete, select
     except Exception:
         from database.connection import AsyncSessionLocal
-        from database.models import Schedule
-        from sqlalchemy import delete
+        from database.models import Schedule, Factory
+        from sqlalchemy import delete, select
 
     now = datetime.now(timezone.utc)
-    factory_ids = [int(b["factory_id"]) for b in blocks]
 
     async with AsyncSessionLocal() as session:
-        # 같은 공장의 미래 슬롯 삭제 (중복 방지)
+        # Supabase에 실제 존재하는 factory_id만 추출
+        result = await session.execute(select(Factory.factory_id))
+        valid_ids = {row[0] for row in result.all()}
+
+        valid_blocks = [b for b in blocks if int(b["factory_id"]) in valid_ids]
+        if not valid_blocks:
+            print(f"[Job A] 저장 가능한 공장 없음 (더미 factory_id가 DB에 없음: {[b['factory_id'] for b in blocks]})")
+            return
+
+        factory_ids = [int(b["factory_id"]) for b in valid_blocks]
         await session.execute(
             delete(Schedule)
             .where(Schedule.factory_id.in_(factory_ids))
             .where(Schedule.start_at >= now)
         )
-        for block in blocks:
+        for block in valid_blocks:
             session.add(Schedule(
                 factory_id=int(block["factory_id"]),
                 target_temp=block.get("recommended_temp_c", block.get("target_temp_c")),
@@ -539,6 +547,7 @@ async def _save_blocks_to_db(blocks: list[dict[str, Any]]) -> None:
                 end_at=datetime.fromisoformat(block["end_at"]),
             ))
         await session.commit()
+        print(f"[Job A] schedules 저장 완료: {len(valid_blocks)}개")
 
 
 def run_job_a_optimization(
@@ -663,7 +672,12 @@ def run_job_a_optimization(
 
     if not dry_run and blocks:
         try:
-            asyncio.run(_save_blocks_to_db(blocks))
+            try:
+                loop = asyncio.get_running_loop()
+                future = asyncio.run_coroutine_threadsafe(_save_blocks_to_db(blocks), loop)
+                future.result(timeout=30)
+            except RuntimeError:
+                asyncio.run(_save_blocks_to_db(blocks))
             result["db_saved"] = True
         except Exception as e:
             result["db_saved"] = False
