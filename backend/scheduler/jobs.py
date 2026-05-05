@@ -560,7 +560,8 @@ def run_job_a_optimization(
     global _LAST_JOB_A_RESULT
 
     data = load_dummy_data(data_path)
-    resolved_now = _resolve_now(data, now=now)
+    # dry_run=False(실제 실행)이면 항상 현재 시각 사용, 테스트일 때만 더미 시각 허용
+    resolved_now = _resolve_now(data, now=now) if dry_run else (now or datetime.now(timezone.utc))
     active_job = _active_job(data)
     if active_job is None:
         result = {
