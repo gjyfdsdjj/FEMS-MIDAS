@@ -1,18 +1,9 @@
-import os
 import sqlite3
-from pathlib import Path
-
-
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "telemetry_buffer.db"
 
 
 class LocalBuffer:
-    def __init__(self, db_path: str | None = None):
-        self.db_path = db_path or os.getenv(
-            "EDGE_BUFFER_DB",
-            str(DEFAULT_DB_PATH),
-        )
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, db_path: str = "/tmp/telemetry_buffer.db"):
+        self.db_path = db_path
         self._init_db()
 
     def _init_db(self):

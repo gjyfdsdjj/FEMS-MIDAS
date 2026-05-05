@@ -1,37 +1,124 @@
 import os
 import time
 import signal
+import threading
+from datetime import datetime, timezone
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
 from communication.mqtt_client import EdgeMQTTClient
-from controllers.peltier_command_runner import build_peltier_runner_from_env
-
-try:
-    from sensors.dht22 import DHT22Reader
-except Exception as exc:
-    DHT22Reader = None
-    DHT22_IMPORT_ERROR = exc
+from sensors.dht22 import DHT22Reader
+from analytics.peltier_manual import PeltierController, Pins
 
 load_dotenv()
 
 NODE_ID = os.getenv("NODE_ID", "node_A")
-FACTORY_IDS = [int(x.strip()) for x in os.getenv("FACTORY_IDS", "1").split(",") if x.strip()]
-if not FACTORY_IDS:
-    FACTORY_IDS = [1]
+FACTORY_IDS = [int(x) for x in os.getenv("FACTORY_IDS", "1,2").split(",")]
 INTERVAL = 5  # 센서 읽기 주기 (초)
-PELTIER_ENABLED = os.getenv("PELTIER_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
-PELTIER_FACTORY_ID = int(os.getenv("PELTIER_FACTORY_ID", FACTORY_IDS[0]))
+PELTIER_DUTY = float(os.getenv("PELTIER_DUTY", "30.0"))
+PELTIER_CHECK_INTERVAL = 5  # 냉각 중 센서 확인 주기 (초)
 
 running = True
+_cooling_threads: dict[int, threading.Thread] = {}
+_cooling_stop_events: dict[int, threading.Event] = {}
 
 
 def handle_signal(sig, frame):
     global running
     print("종료 신호 수신, 안전 종료 중...")
     running = False
+    for event in _cooling_stop_events.values():
+        event.set()
 
 
 signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
+
+
+def _update_schedule_end_at(factory_id: int, end_at: datetime) -> None:
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        print(f"[DB] DATABASE_URL 없음, end_at 업데이트 생략")
+        return
+    db_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+    try:
+        engine = create_engine(db_url)
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "UPDATE schedules SET end_at = :end_at "
+                    "WHERE factory_id = :factory_id AND end_at IS NULL "
+                    "ORDER BY start_at DESC LIMIT 1"
+                ),
+                {"end_at": end_at, "factory_id": factory_id},
+            )
+            conn.commit()
+        print(f"[DB] factory={factory_id} schedules.end_at 업데이트 완료: {end_at.isoformat()}")
+    except Exception as e:
+        print(f"[DB] end_at 업데이트 실패: {e}")
+
+
+def _cool_to_target(factory_id: int, target_temp: float, sensor: DHT22Reader, stop_event: threading.Event):
+    controller = PeltierController(pins=Pins())
+    print(f"[Peltier] factory={factory_id} 목표온도 {target_temp}°C 까지 냉각 시작")
+    end_at_recorded = False
+    try:
+        controller.setup()
+        controller.start(duty=PELTIER_DUTY, direction="forward")
+        while not stop_event.is_set():
+            data = sensor.read()
+            if data is None:
+                time.sleep(PELTIER_CHECK_INTERVAL)
+                continue
+            current = data["temperature_c"]
+            print(f"[Peltier] factory={factory_id} 현재={current}°C 목표={target_temp}°C")
+            if current <= target_temp:
+                print(f"[Peltier] factory={factory_id} 목표온도 도달, 정지")
+                _update_schedule_end_at(factory_id, datetime.now(timezone.utc))
+                end_at_recorded = True
+                break
+            time.sleep(PELTIER_CHECK_INTERVAL)
+    except Exception as e:
+        print(f"[Peltier] factory={factory_id} 오류: {e}")
+    finally:
+        if not end_at_recorded:
+            _update_schedule_end_at(factory_id, datetime.now(timezone.utc))
+        try:
+            controller.stop()
+            controller.cleanup()
+        except Exception:
+            pass
+
+
+def make_command_handler(sensors: dict[int, DHT22Reader]):
+    def handle_command(factory_id: int, action: str, payload: dict):
+        if action != "SET_TARGET_TEMP":
+            print(f"[CMD] 미지원 명령: {action}")
+            return
+
+        target_temp = float(payload.get("value", -18.0))
+        print(f"[CMD] 스케줄 수신 ✓ factory={factory_id}, 목표온도={target_temp}°C")
+        sensor = sensors.get(factory_id)
+        if sensor is None:
+            print(f"[CMD] factory={factory_id} 센서 없음, 무시")
+            return
+
+        # 기존 냉각 중이면 중단 후 대기
+        if factory_id in _cooling_stop_events:
+            _cooling_stop_events[factory_id].set()
+        if factory_id in _cooling_threads:
+            _cooling_threads[factory_id].join(timeout=10)
+
+        stop_event = threading.Event()
+        _cooling_stop_events[factory_id] = stop_event
+        t = threading.Thread(
+            target=_cool_to_target,
+            args=(factory_id, target_temp, sensor, stop_event),
+            daemon=True,
+        )
+        _cooling_threads[factory_id] = t
+        t.start()
+
+    return handle_command
 
 
 def main():
@@ -41,74 +128,14 @@ def main():
     mqtt.connect()
     time.sleep(1)
 
-    peltier_runner = None
-    peltier_unavailable_status = None
-    if PELTIER_ENABLED:
-        try:
-            peltier_runner = build_peltier_runner_from_env(
-                status_callback=lambda status: mqtt.publish_peltier_status(PELTIER_FACTORY_ID, status)
-            )
-            peltier_runner.start()
-        except Exception as exc:
-            print(f"[PELTIER] disabled after startup error: {exc}")
-            peltier_unavailable_status = {
-                "component": "peltier",
-                "available": False,
-                "state": "unavailable",
-                "last_error": str(exc),
-            }
-            mqtt.publish_peltier_status(PELTIER_FACTORY_ID, peltier_unavailable_status)
-            peltier_runner = None
-
-    def handle_command(command):
-        factory_id = command.get("factory_id")
-        if factory_id != PELTIER_FACTORY_ID:
-            return
-
-        if peltier_runner is None:
-            mqtt.publish_peltier_status(
-                PELTIER_FACTORY_ID,
-                {
-                    "component": "peltier",
-                    "available": False,
-                    "state": "unavailable",
-                    "last_action": command.get("action"),
-                    "last_command_id": command.get("command_id"),
-                    "last_error": "peltier runner is not available",
-                },
-            )
-            return
-
-        peltier_runner.submit(command)
-
-    mqtt.command_handler = handle_command
-
-    sensors = {}
-
-    def publish_peltier_snapshot():
-        try:
-            if peltier_runner is not None:
-                mqtt.publish_peltier_status(PELTIER_FACTORY_ID, peltier_runner.status_payload())
-            elif peltier_unavailable_status is not None:
-                mqtt.publish_peltier_status(PELTIER_FACTORY_ID, peltier_unavailable_status)
-        except Exception as exc:
-            print(f"[PELTIER] status snapshot publish failed: {exc}")
+    sensors = {fid: DHT22Reader(fid) for fid in FACTORY_IDS}
+    mqtt.on_command = make_command_handler(sensors)
 
     try:
-        if DHT22Reader is None:
-            print(f"[DHT22] disabled after import error: {DHT22_IMPORT_ERROR}")
-        else:
-            for factory_id in FACTORY_IDS:
-                try:
-                    sensors[factory_id] = DHT22Reader(factory_id)
-                except Exception as exc:
-                    print(f"[DHT22] factory={factory_id} disabled after startup error: {exc}")
-
         while running:
             mqtt.reconnect_if_needed()
-            publish_peltier_snapshot()
-            for factory_id, sensor in sensors.items():
-                data = sensor.read()
+            for factory_id in FACTORY_IDS:
+                data = sensors[factory_id].read()
                 if data:
                     mqtt.publish_telemetry(
                         factory_id,
@@ -120,10 +147,10 @@ def main():
                     print(f"공장 {factory_id} 센서 읽기 실패, 건너뜀")
             time.sleep(INTERVAL)
     finally:
+        for event in _cooling_stop_events.values():
+            event.set()
         for sensor in sensors.values():
             sensor.close()
-        if peltier_runner is not None:
-            peltier_runner.shutdown()
         mqtt.disconnect()
         print("Edge 노드 종료 완료")
 

@@ -1,7 +1,5 @@
 import json
 import os
-from typing import Callable, Optional
-
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 from storage.local_buffer import LocalBuffer
@@ -10,18 +8,13 @@ load_dotenv()
 
 
 class EdgeMQTTClient:
-    def __init__(
-        self,
-        node_id: str,
-        factory_ids: list,
-        command_handler: Optional[Callable[[dict], None]] = None,
-    ):
+    def __init__(self, node_id: str, factory_ids: list):
         self.node_id = node_id
         self.factory_ids = factory_ids
-        self.command_handler = command_handler
         self._connected = False
         self._buffer = LocalBuffer()
         self._pending_acks = {}  # mid → db_id
+        self.on_command = None  # callback(factory_id: int, action: str, payload: dict)
         self.client = mqtt.Client()
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -69,20 +62,16 @@ class EdgeMQTTClient:
 
     def _on_message(self, client, userdata, msg):
         try:
+            print(f"[RAW] {msg.topic} → {msg.payload}")
             payload = json.loads(msg.payload.decode())
+            action = payload.get("action")
+            parts = msg.topic.split("/")
+            factory_id = int(parts[2]) if len(parts) >= 4 else None
             print(f"명령 수신: {msg.topic} → {payload}")
-            if self.command_handler is not None:
-                payload = self._with_topic_metadata(msg.topic, payload)
-                self.command_handler(payload)
+            if self.on_command and factory_id is not None and action:
+                self.on_command(factory_id, action, payload.get("payload", {}))
         except Exception as e:
             print(f"명령 처리 오류: {e}")
-
-    def _with_topic_metadata(self, topic: str, payload: dict) -> dict:
-        parts = topic.split("/")
-        if len(parts) >= 4 and parts[0] == "factory":
-            payload.setdefault("node_id", parts[1])
-            payload.setdefault("factory_id", int(parts[2]))
-        return payload
 
     def _on_publish(self, client, userdata, mid):
         db_id = self._pending_acks.pop(mid, None)
@@ -117,13 +106,3 @@ class EdgeMQTTClient:
         topic = f"factory/{self.node_id}/{factory_id}/telemetry"
         self.client.publish(topic, json.dumps(payload), qos=1)
         print(f"발행: {topic} → temp={temperature_c}°C, humidity={humidity_pct}%")
-
-    def publish_peltier_status(self, factory_id: int, status: dict):
-        payload = {
-            "node_id": self.node_id,
-            "factory_id": factory_id,
-            **status,
-        }
-        topic = f"factory/{self.node_id}/{factory_id}/peltier/status"
-        self.client.publish(topic, json.dumps(payload), qos=1)
-        print(f"상태 발행: {topic} → {payload.get('state')}")
