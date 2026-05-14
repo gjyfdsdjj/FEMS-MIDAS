@@ -410,6 +410,42 @@
     {"timestamp": "2026-04-02T18:00:00+09:00", "predicted_solar_kwh": 0.1}
   ],
 
+  // ── 태양광 일별 실측(합성 더미, §8-2 보정·학습용) ────────────────────
+  // 기간: 2026-04-15 ~ 2026-05-14 (30일, KST 달력). 기준일 2026-05-14 가정.
+  // 패턴: 말→초순으로 일합계 서서히 증가, 토/일 약간 감소, 일부일은 흐림(0.71배) 가정.
+  "actual_solar_daily_kwh": [
+    { "date": "2026-04-15", "actual_kwh": 8.4, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-16", "actual_kwh": 8.7, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-17", "actual_kwh": 8.92, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-18", "actual_kwh": 8.39, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-19", "actual_kwh": 8.39, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-20", "actual_kwh": 6.38, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-21", "actual_kwh": 8.99, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-22", "actual_kwh": 9.1, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-23", "actual_kwh": 9.32, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-24", "actual_kwh": 9.61, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-25", "actual_kwh": 9.22, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-26", "actual_kwh": 9.42, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-27", "actual_kwh": 7.26, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-28", "actual_kwh": 10.23, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-29", "actual_kwh": 10.19, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-30", "actual_kwh": 10.2, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-01", "actual_kwh": 10.31, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-02", "actual_kwh": 9.79, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-03", "actual_kwh": 10.07, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-04", "actual_kwh": 11.12, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-05", "actual_kwh": 11.34, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-06", "actual_kwh": 11.44, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-07", "actual_kwh": 8.12, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-08", "actual_kwh": 11.4, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-09", "actual_kwh": 10.61, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-10", "actual_kwh": 10.71, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-11", "actual_kwh": 11.75, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-12", "actual_kwh": 12.04, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-13", "actual_kwh": 12.34, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-14", "actual_kwh": 12.55, "source": "DUMMY_SYNTHETIC" }
+  ],
+
   // ── 예지 보전 진단 (Isolation Forest + Prophet 결합) ─────────────
   // health_score: 1.0=완전정상 / 0.6 이하=주의 / 0.4 이하=교체 권고
   "predict_maintenance": [
