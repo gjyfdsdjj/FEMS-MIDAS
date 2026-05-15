@@ -3,12 +3,22 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import Factory, Schedule, SensorLog
+from backend.database.models import Factory, Schedule, SensorLog
 
 # factory_id에 해당하는 공장 정보를 조회
 # QR 조회 화면에 표시할 공장명, 공장 상태 등을 가져올 때 사용
 async def get_factory_by_id(db: AsyncSession, factory_id: int):
-    return await db.get(Factory, factory_id)
+    factory = await db.get(Factory, factory_id)
+
+    if factory is None:
+        return None
+
+    return {
+        "factory_id": factory.factory_id,
+        "name" : factory.name,
+        "status": factory.status,
+    }
+    
 
 # 특정 공장의 가장 최근 센서 로그 1건 조회
 # 현재 온도, 습도, 마지막 측정 시간을 화면에 표시할 때 사용 
@@ -20,7 +30,18 @@ async def get_latest_sensor_log(db: AsyncSession, factory_id: int):
         .limit(1)
     )
 
-    return result.scalar_one_or_none()
+    sensor_log = result.scalar_one_or_none()
+
+    if sensor_log is None:
+        return None
+
+    return {
+        "id": sensor_log.id,
+        "factory_id": sensor_log.factory_id,
+        "temperature_c": float(sensor_log.temperature_c),
+        "humidity_pct": float(sensor_log.humidity_pct),
+        "measured_at": sensor_log.measured_at.isoformat(),
+    } 
 
 # 현재 시간 기준으로 실행 중인 스케줄 조회  
 async def get_current_schedule(db: AsyncSession, factory_id: int):
@@ -35,7 +56,19 @@ async def get_current_schedule(db: AsyncSession, factory_id: int):
         .limit(1)
     )
 
-    return result.scalar_one_or_none()
+    schedule = result.scalar_one_or_none()
+
+    if schedule is None:
+        return None
+
+    return {
+        "id": schedule.id,
+        "factory_id": schedule.factory_id,
+        "target_temp": schedule.target_temp,
+        "mode": schedule.mode,
+        "start_at": schedule.start_at.isoformat(),
+        "end_at": schedule.end_at.isoformat(),
+    }
 
 # 현재 시간 이후에 예정된 가장 가까운 스케줄 1건 조회
 async def get_next_schedule(db: AsyncSession, factory_id: int):
@@ -49,7 +82,19 @@ async def get_next_schedule(db: AsyncSession, factory_id: int):
         .limit(1)
     )
 
-    return result.scalar_one_or_none()
+    schedule = result.scalar_one_or_none()
+
+    if schedule is None:
+        return None
+
+    return {
+        "id": schedule.id,
+        "factory_id": schedule.factory_id,
+        "target_temp": schedule.target_temp,
+        "mode": schedule.mode,
+        "start_at": schedule.start_at.isoformat(),
+        "end_at": schedule.end_at.isoformat(),
+    }
 
 # 최근 N시간 동안의 온도 이력 조회
 # 기본값은 최근 24시간이며, QR 화면의 온도 그래프 데이터로 사용 
@@ -70,7 +115,7 @@ async def get_temperature_history(
 
     return [
         { 
-            "timestamp": row.measured_at, 
+            "timestamp": row.measured_at.isoformat(), 
              "temperature_c": float(row.temperature_c) 
             if row.temperature_c is not None 
             else None, 
