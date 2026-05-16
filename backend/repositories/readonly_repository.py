@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.database.models import Factory, Schedule, SensorLog
+from database.models import Factory, Schedule, SensorLog
 
 # factory_id에 해당하는 공장 정보를 조회
 # QR 조회 화면에 표시할 공장명, 공장 상태 등을 가져올 때 사용

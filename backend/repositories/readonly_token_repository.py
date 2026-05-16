@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.database.models import ReadonlyToken
+from database.models import ReadonlyToken
 
 # QR 읽기 전용 토큰 발급
 # POST /api/v1/readonly/tokens 요청 시 새로운 토큰 생성에 사용

@@ -13,15 +13,21 @@
 #     제어 관련 필드(manual_stop, pwm_pct 등) 제외하고 반환
 
 import os
+import secrets
+
 from mqtt.status_store import status_store
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.repositories.readonly_token_repository import get_readonly_token
-from backend.repositories.readonly_repository import (
+from repositories.readonly_token_repository import (
+    get_readonly_token,
+    create_readonly_token,
+)
+
+from repositories.readonly_repository import (
     get_factory_by_id,
     get_latest_sensor_log,
     get_current_schedule,
@@ -51,9 +57,37 @@ def _status_from_temp(temp: float | None, measured_at: datetime | None) -> str:
 
     return "NORMAL"
 
+# 공장 QR 조회용 읽기 전용 토큰 생성 후, DB에 저장한 뒤, 
+# 프론트에서 사용할 URL까지 만들어 반환 
+async def issue_readonly_token(
+        db: AsyncSession,
+        factory_id: int,
+        expires_in_minutes: int = 60,
+):
+    token = secrets.token_urlsafe(32)
+
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
+
+    await create_readonly_token(
+        db=db,
+        factory_id=factory_id,
+        token=token,
+        expires_at=expires_at
+    )
+
+    return {
+        "factory_id": factory_id,
+        "token": token,
+        "readonly_url": f"/readonly/{token}",
+        "expires_at": _iso(expires_at),
+    }
+
+
 async def get_readonly_data(db: AsyncSession, token: str):
+    # 1.  전달받은 QR 토큰이 DB에 존재하는지 조회
     readonly_token = await get_readonly_token(db, token)
 
+    # 2. 토큰이 존재하지 않으면 404 에러 
     if readonly_token is None:
         return JSONResponse(
             status_code=404,
@@ -67,6 +101,7 @@ async def get_readonly_data(db: AsyncSession, token: str):
             },
         )
     
+    # 3. 토큰은 존재하지만 비활성화된 토큰이면 접근 차단 
     if not readonly_token["is_active"]:
         return JSONResponse(
             status_code=403,
@@ -80,14 +115,17 @@ async def get_readonly_data(db: AsyncSession, token: str):
             },
         ) 
     
+    # 4. 토큰 만료 시간 가져옴
     expires_at = readonly_token["expires_at"]
 
+    # 5. 만료 시간이 있다면 현재 시간과 비교 
     if expires_at is not None:
         now = datetime.now(timezone.utc)
 
         if expires_at.tzinfo is None:
            expires_at = expires_at.replace(tzinfo=timezone.utc)
 
+        # 6. 이미 만료된 토큰이면 접근 차단 
         if expires_at < now:
             return JSONResponse(
                 status_code=403,
@@ -100,7 +138,7 @@ async def get_readonly_data(db: AsyncSession, token: str):
                     },
                 },
             )
-
+    # 7. 유효한 토큰이면 토큰에 연결된 공장 ID 가져옴 
     factory_id = readonly_token["factory_id"]
 
     factory = await get_factory_by_id(db, factory_id)
