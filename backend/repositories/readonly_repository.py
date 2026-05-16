@@ -38,9 +38,9 @@ async def get_latest_sensor_log(db: AsyncSession, factory_id: int):
     return {
         "id": sensor_log.id,
         "factory_id": sensor_log.factory_id,
-        "temperature_c": float(sensor_log.temperature_c),
-        "humidity_pct": float(sensor_log.humidity_pct),
-        "measured_at": sensor_log.measured_at.isoformat(),
+        "temperature_c": float(sensor_log.temperature_c) if sensor_log.temperature_c is not None else None,
+        "humidity_pct": float(sensor_log.humidity_pct) if sensor_log.humidity_pct is not None else None,
+        "measured_at": sensor_log.measured_at,
     } 
 
 # 현재 시간 기준으로 실행 중인 스케줄 조회  
@@ -66,8 +66,8 @@ async def get_current_schedule(db: AsyncSession, factory_id: int):
         "factory_id": schedule.factory_id,
         "target_temp": schedule.target_temp,
         "mode": schedule.mode,
-        "start_at": schedule.start_at.isoformat(),
-        "end_at": schedule.end_at.isoformat(),
+        "start_at": schedule.start_at,
+        "end_at": schedule.end_at,
     }
 
 # 현재 시간 이후에 예정된 가장 가까운 스케줄 1건 조회
@@ -92,8 +92,8 @@ async def get_next_schedule(db: AsyncSession, factory_id: int):
         "factory_id": schedule.factory_id,
         "target_temp": schedule.target_temp,
         "mode": schedule.mode,
-        "start_at": schedule.start_at.isoformat(),
-        "end_at": schedule.end_at.isoformat(),
+        "start_at": schedule.start_at,
+        "end_at": schedule.end_at,
     }
 
 # 최근 N시간 동안의 온도 이력 조회
@@ -116,7 +116,7 @@ async def get_temperature_history(
     return [
         { 
             "timestamp": row.measured_at.isoformat(), 
-             "temperature_c": float(row.temperature_c) 
+             "temperature_c": float(row.temperature_c) if row.temperature_c is not None else None 
             if row.temperature_c is not None 
             else None, 
         }
