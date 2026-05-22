@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import ReadonlyToken
@@ -14,6 +14,8 @@ async def create_readonly_token(
     token: str,
     expires_at: datetime | None,
 ):
+    print("INSERT 시도:", factory_id, token, expires_at)
+
     readonly_token = ReadonlyToken(
         factory_id=factory_id,
         token=token,
@@ -24,6 +26,14 @@ async def create_readonly_token(
     db.add(readonly_token)
     await db.commit()
     await db.refresh(readonly_token)
+
+    print("INSERT 완료 ID:", readonly_token.id)
+
+    check = await db.execute(
+        select(ReadonlyToken).where(ReadonlyToken.id == readonly_token.id)
+    )
+    saved_token = check.scalar_one_or_none()
+
 
     return {
         "id": readonly_token.id,

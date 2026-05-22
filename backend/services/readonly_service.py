@@ -15,6 +15,10 @@
 import os
 import secrets
 
+import base64
+from io import BytesIO
+import qrcode
+
 from mqtt.status_store import status_store
 
 from datetime import datetime, timezone, timedelta
@@ -42,6 +46,19 @@ def _iso(dt: datetime | None) -> str | None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
 
+
+# readonly_url을 QR 이미지로 변환한 뒤,
+# 프론트에서 바로 렌더링할 수 있도록 Base64 문자열 형태로 반환
+def _generate_qr_code_base64(url: str) -> str:
+    qr_img = qrcode.make(url)
+
+    buffer = BytesIO()
+    qr_img.save(buffer, format="PNG")
+
+    qr_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    return f"data:image/png;base64,{qr_base64}"
+
 def _status_from_temp(temp: float | None, measured_at: datetime | None) -> str:
     if temp is None or measured_at is None:
         return "WAITING"
@@ -58,7 +75,7 @@ def _status_from_temp(temp: float | None, measured_at: datetime | None) -> str:
     return "NORMAL"
 
 # 공장 QR 조회용 읽기 전용 토큰 생성 후, DB에 저장한 뒤, 
-# 프론트에서 사용할 URL까지 만들어 반환 
+# 프론트에서 사용할 readonly_url과 QR 이미지(Base64), 만료 시간을 반환 
 async def issue_readonly_token(
         db: AsyncSession,
         factory_id: int,
@@ -75,10 +92,15 @@ async def issue_readonly_token(
         expires_at=expires_at
     )
 
+    frontend_base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:8501").strip()
+    readonly_url = f"{frontend_base_url}/?token={token}"
+    qr_code_base64 = _generate_qr_code_base64(readonly_url)
+
     return {
         "factory_id": factory_id,
         "token": token,
-        "readonly_url": f"/readonly/{token}",
+        "readonly_url": readonly_url,
+        "qr_code_base64": qr_code_base64,
         "expires_at": _iso(expires_at),
     }
 
