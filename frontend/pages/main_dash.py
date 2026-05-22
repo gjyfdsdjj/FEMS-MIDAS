@@ -1,16 +1,24 @@
 import streamlit as st
 import random
-import math
-from datetime import datetime, timedelta
+import json5
 import plotly.graph_objects as go
-import plotly.express as px
-import pandas as pd
 import time
-
+import sys
 from pathlib import Path
+from datetime import datetime
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from components.main.factory_detail import factory_detail
+from components.main.notification import notification_popover
+from components.main.factory_status import factory_status
+from components.main.energy_cost import energy_cost
+from components.main.op_manage import operation_manage
+from components.main.manual_control import manual_control
+
 
 st.set_page_config(
-    page_title="대시보드",
+    page_title="MIDAS FEMS 대시보드",
     page_icon="❄️",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -23,95 +31,21 @@ def load_css(file_name):
 
 load_css("main.css")
 
+DATA_PATH = Path(__file__).resolve().parents[2] / "backend" / "database" / "dummy_data.jsonc"
 
-# 임시 데이터
-FACTORIES = [
-    {
-        "id": "F-01", "name": "F1 - 경산", 
-        "temp": -22.4, "hum": 68, "power": 214,
-        "status": "ok", "target": -22, "max_temp": -18, "min_temp": -26,
-        "equip": [
-            {"n": "압축기 A", "v": "가동 중", "s": "ok"},
-            {"n": "압축기 B", "v": "가동 중", "s": "ok"},
-            {"n": "압축기 C", "v": "대기", "s": "warn"},
-            {"n": "증발기",  "v": "정상",  "s": "ok"},
-            {"n": "팬모터",  "v": "정상",  "s": "ok"},
-            {"n": "온도센서", "v": "정상", "s": "ok"},
-        ],
-        "alarms": [],
-    },
-    {
-        "id": "F-02", "name": "F2 - 대구", 
-        "temp": -18.7, "hum": 72, "power": 187,
-        "status": "warn", "target": -22, "max_temp": -18, "min_temp": -26,
-        "equip": [
-            {"n": "압축기 A", "v": "가동 중",  "s": "ok"},
-            {"n": "압축기 B", "v": "가동 중",  "s": "ok"},
-            {"n": "압축기 C", "v": "정지",    "s": "err"},
-            {"n": "증발기",  "v": "결빙주의", "s": "warn"},
-            {"n": "팬모터",  "v": "정상",     "s": "ok"},
-            {"n": "온도센서", "v": "정상",    "s": "ok"},
-        ],
-        "alarms": [{"msg": "내부 온도 목표 초과 (+3.3°C)", "time": "14:12"}],
-    },
-    {
-        "id": "F-03", "name": "F3 - 구미 1", 
-        "temp": -24.1, "hum": 65, "power": 231,
-        "status": "ok", "target": -24, "max_temp": -20, "min_temp": -28,
-        "equip": [
-            {"n": "압축기 A", "v": "가동 중", "s": "ok"},
-            {"n": "압축기 B", "v": "가동 중", "s": "ok"},
-            {"n": "압축기 C", "v": "가동 중", "s": "ok"},
-            {"n": "증발기",  "v": "정상",   "s": "ok"},
-            {"n": "팬모터",  "v": "정상",   "s": "ok"},
-            {"n": "온도센서", "v": "정상",  "s": "ok"},
-        ],
-        "alarms": [],
-    },
-    {
-        "id": "F-04", "name": "F4 - 구미 2", 
-        "temp": -15.2, "hum": 78, "power": 215,
-        "status": "warn", "target": -15, "max_temp": -12, "min_temp": -20,
-        "equip": [
-            {"n": "압축기 A", "v": "가동 중",   "s": "ok"},
-            {"n": "압축기 B", "v": "가동 중",   "s": "ok"},
-            {"n": "압축기 C", "v": "미설치",   "s": "ok"},
-            {"n": "증발기",  "v": "정상",      "s": "ok"},
-            {"n": "팬모터",  "v": "진동감지",  "s": "warn"},
-            {"n": "온도센서", "v": "정상",     "s": "ok"},
-        ],
-        "alarms": [{"msg": "팬모터 진동 수치 상승", "time": "13:58"}],
-    },
-]
+@st.cache_data
+def load_dummy_data():
+    with open(DATA_PATH, "r", encoding="utf-8") as f:
+        return json5.load(f)
 
-SCHEDULE = {
-    "냉동1": ["on","on","on","on","on","on","on","off","off","peak","peak","peak","peak","off","off","off","on","on","peak","peak","off","on","on","on"],
-    "냉동2": ["off","off","off","off","on","on","on","on","off","off","peak","peak","on","on","off","on","on","on","peak","off","off","off","off","off"],
-    "냉동3": ["on","on","off","off","off","on","on","on","on","on","peak","peak","off","off","on","on","on","peak","peak","off","off","on","on","on"],
-    "태양광": ["off","off","off","off","off","off","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","off","off","off","off","off","off"],
-    "요금대": ["off","off","off","off","off","off","off","off","off","peak","peak","peak","peak","peak","off","off","off","off","peak","peak","off","off","off","off"],
-}
-
-SAV_MONTHLY = {"labels": ["1월","2월","3월","4월","5월","6월"], "vals": [420,380,490,560,610,540], "max": 700}
-SAV_DAILY   = {"labels": ["월","화","수","목","금","토"],       "vals": [72,85,68,91,84,76],     "max": 110}
+dummy_data = load_dummy_data()
 
 
-def init_state():
-    defaults = {
-        "sav_tab": "monthly",
-        "ctrl_log": ["14:22  시스템 자동 가동 시작", "13:45  냉동2 온도 경보 해제"],
-        "emergency": False,
-        "factories": [dict(f) for f in FACTORIES],
-        "power_kw": 847.0,
-        "solar_kw": 238.0,
-        "last_tick": time.time(),
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-init_state()
-
+def convert_status(status):
+    if status in ("NORMAL", "SAVING"):      return "ok"
+    if status in ("WARNING", "MANUAL_STOP", "STOPPED"): return "warn"
+    if status == "EMERGENCY":               return "err"
+    return "ok"
 
 def status_color(s):
     return {"ok": "#3b6d11", "warn": "#854f0b", "err": "#a32d2d"}.get(s, "#888780")
@@ -134,461 +68,365 @@ def temp_pct(t, mn, mx):
 def badge_html(text, kind="ok"):
     return f'<span class="badge badge-{kind}">{text}</span>'
 
-def log_action(action):
-    ts = datetime.now().strftime("%H:%M")
-    st.session_state.ctrl_log.insert(0, f"{ts}  {action} 실행")
-
-def kpi_card(label, value, unit, sub, pct, accent, delta_text="", delta_kind="ok"):
-    bar_html = f'<div class="kpi-bar-wrap"><div class="kpi-bar-fill" style="width:{pct:.1f}%;background:{accent}"></div></div>'
-    delta_html = f'<div class="delta-{delta_kind}">{delta_text}</div>' if delta_text else ""
-    return f"""
-    <div class="kpi-card" style="--accent:{accent}">
-      <div class="kpi-label">{label}</div>
-      <div class="kpi-value">{value}<span class="kpi-unit">{unit}</span></div>
-      {bar_html}
-      <div class="kpi-sub">{sub}</div>
-      {delta_html}
-    </div>
-    """
-
 def hex_to_rgba(hex_color, alpha=0.08):
-    hex_color = hex_color.lstrip("#")
-    r = int(hex_color[0:2], 16)
-    g = int(hex_color[2:4], 16)
-    b = int(hex_color[4:6], 16)
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
     return f"rgba({r},{g},{b},{alpha})"
 
-def sparkline_fig(data, color, height=50):
-    fig = go.Figure()
+def log_action(action):
+    ts = datetime.now().strftime("%H:%M")
+    st.session_state.ctrl_log.insert(0, f"{ts}  {action}")
 
-    fill_color = (
-        color.replace(")", ",0.08)").replace("rgb", "rgba")
-        if "rgb" in color
-        else hex_to_rgba(color, 0.08)
-    )
-
-    fig.add_trace(go.Scatter(
-        y=data,
-        mode="lines",
-        line=dict(color=color, width=1.8, shape="spline"),
-        fill="tozeroy",
-        fillcolor=fill_color,
-    ))
-
-    fig.update_layout(
-        margin=dict(l=0, r=0, t=0, b=0),
-        height=height,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        showlegend=False,
-    )
-    return fig
-
-def schedule_fig():
-    now_h = datetime.now().hour
-    cell_colors = {"on": "#378add", "peak": "#e24b4a", "solar": "#639922", "off": "#f1efe8"}
-    rows = list(SCHEDULE.keys())
-    hours = list(range(24))
-
-    z = []
-    text = []
-    for row in rows:
-        pat = SCHEDULE[row]
-        z.append([{"on":1,"peak":2,"solar":3,"off":0}[p] for p in pat])
-        text.append([pat[h] for h in hours])
-
-    colorscale = [
-        [0.00, "#f1efe8"], [0.25, "#f1efe8"],
-        [0.25, "#378add"], [0.50, "#378add"],
-        [0.50, "#e24b4a"], [0.75, "#e24b4a"],
-        [0.75, "#639922"], [1.00, "#639922"],
+def get_factory_alarms(factory_id):
+    return [
+        {"msg": a["message"], "time": a["created_at"][11:16],
+         "level": a["level"], "acknowledged": a["is_acknowledged"],
+         "alert_id": a["alert_id"]}
+        for a in dummy_data.get("alerts", [])
+        if a["factory_id"] == factory_id
     ]
 
-    fig = go.Figure(go.Heatmap(
-        z=z,
-        x=[f"{h}h" for h in hours],
-        y=rows,
-        colorscale=colorscale,
-        zmin=0, zmax=3,
-        showscale=False,
-        xgap=1, ygap=2,
-    ))
-    
-    fig.add_vline(x=now_h - 0.5, line_width=2, line_color="#1a1a2e", opacity=0.6)
+def get_all_unacked_alerts():
+    return [a for a in dummy_data.get("alerts", []) if not a["is_acknowledged"]]
 
-    fig.update_layout(
-        margin=dict(l=60, r=10, t=10, b=30),
-        height=160,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(
-            tickvals=[0,6,12,18,23],
-            ticktext=["0h","6h","12h","18h","24h"],
-            tickfont=dict(size=10, color="#888780"),
-            gridcolor="rgba(0,0,0,0)",
-        ),
-        yaxis=dict(tickfont=dict(size=11, color="#888780"), gridcolor="rgba(0,0,0,0)"),
-    )
-    return fig
+def get_maintenance_info(factory_id):
+    return next((m for m in dummy_data.get("predict_maintenance", [])
+                 if m["factory_id"] == factory_id), None)
 
-def savings_fig(tab):
-    d = SAV_MONTHLY if tab == "monthly" else SAV_DAILY
-    fig = go.Figure(go.Bar(
-        x=d["vals"], y=d["labels"],
-        orientation="h",
-        marker_color="#378add",
-        marker_line_width=0,
-        text=[f"₩{v}만" for v in d["vals"]],
-        textposition="outside",
-        textfont=dict(size=11, color="#444441"),
-    ))
-    fig.update_layout(
-        margin=dict(l=10, r=60, t=10, b=10),
-        height=170,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(visible=False, range=[0, d["max"] * 1.25]),
-        yaxis=dict(
-        tickfont=dict(size=11, color="#888780"),
-        gridcolor="rgba(0,0,0,0)",
-        categoryorder="array",
-        categoryarray=d["labels"][::-1],
-    ),
-        showlegend=False,
-    )
-    return fig
+def get_temp_predictions(factory_id):
+    return [p for p in dummy_data.get("predict_temperature", [])
+            if p["factory_id"] == factory_id]
 
-def temp_trend_fig(f, n=20):
-    base = f["temp"]
-    data = [round(base + random.uniform(-0.8, 0.8), 1) for _ in range(n - 1)] + [base]
-    target_line = [f["target"]] * n
-    clr = bar_color(base, f["target"])
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        y=target_line, mode="lines",
-        line=dict(color="#e0e3ea", width=1, dash="dash"),
-        name="목표온도", showlegend=False,
-    ))
-    fig.add_trace(go.Scatter(
-        y=data, mode="lines+markers",
-        line=dict(color=clr, width=2, shape="spline"),
-        marker=dict(size=4, color=clr),
-        fill="tozeroy",
-        fillcolor=hex_to_rgba(clr, 0.08),
-        name="온도", showlegend=False,
-    ))
-    fig.update_layout(
-        margin=dict(l=40, r=10, t=10, b=20),
-        height=120,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(
-            tickvals=[0, n-1],
-            ticktext=["1시간 전", "현재"],
-            tickfont=dict(size=10, color="#b4b2a9"),
-            gridcolor="rgba(0,0,0,0)",
-        ),
-        yaxis=dict(tickfont=dict(size=10, color="#888780"), gridcolor="#f1efe8"),
-    )
-    return fig
+def make_equip(factory):
+    return [
+        {"n": "통신 상태", "v": factory["communication_status"],
+         "s": "ok" if factory["communication_status"] == "OK" else "warn"},
+        {"n": "제어 모드", "v": factory["control_mode"],
+         "s": "ok" if factory["control_mode"] == "AUTO" else "warn"},
+        {"n": "스케줄",   "v": factory["current_schedule_mode"],
+         "s": "warn" if factory["current_schedule_mode"] in ("OFF","COASTING") else "ok"},
+        {"n": "PWM",      "v": f"{factory['pwm_pct']}%",
+         "s": "err" if factory["pwm_pct"]==0 and factory["manual_stop"] else "ok"},
+        {"n": "재고",     "v": f"{factory['current_stock_units']}/{factory['capacity_units']}", "s": "ok"},
+        {"n": "노드",     "v": factory["node_id"], "s": "ok"},
+    ]
 
 
-# 공장 상세 정보 모달창
-@st.dialog("공장 상세 정보", width="large")
-def show_factory_detail(f):
-    sc     = status_color(f["status"])
-    sb     = status_bg(f["status"])
-    st_txt = status_text(f["status"])
+# 데이터
+FACTORIES = [
+    {
+        "id": f"F-{f['factory_id']:02d}",
+        "factory_id": f["factory_id"],
+        "name": f["name"],
+        "temp": f["temperature_c"],
+        "hum": f["humidity_pct"],
+        "power": f["pwm_pct"],
+        "status": convert_status(f["status"]),
+        "raw_status": f["status"],
+        "target": f["target_temp_c"],
+        "max_temp": f["target_temp_c"] + 2,
+        "min_temp": f["target_temp_c"] - 8,
+        "equip": make_equip(f),
+        "alarms": get_factory_alarms(f["factory_id"]),
+        "manual_stop": f["manual_stop"],
+        "current_stock_units": f["current_stock_units"],
+        "capacity_units": f["capacity_units"],
+    }
+    for f in dummy_data["factories"]
+]
 
-    dh1, dh2 = st.columns([3, 1])
-    with dh1:
-        st.markdown(f"""
-        <div style="margin-bottom:8px">
-          <div style="font-size:17px;font-weight:500;color:#1a1a2e">
-            {f['name']}
-            <span style="font-size:13px;color:#888780;font-weight:400">&nbsp;{f['id']}</span>
-          </div>
-          <div style="font-size:12px;color:#888780;margin-top:3px">
-            목표온도 {f['target']}°C &nbsp;·&nbsp; 압축기 가동 중
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-    with dh2:
-        st.markdown(
-            f'<div style="text-align:right;padding-top:6px">'
-            f'<span class="badge" style="background:{sb};color:{sc};font-size:13px;padding:5px 14px">{st_txt}</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.divider()
-
-    dm1, dm2, dm3, dm4 = st.columns(4)
-    hdata  = [round(f["temp"]  + random.uniform(-0.8, 0.8), 1) for _ in range(19)] + [f["temp"]]
-    phdata = [round(f["hum"]   + random.uniform(-2, 2),     1) for _ in range(19)] + [f["hum"]]
-    pwdata = [round(f["power"] + random.uniform(-15, 15),   0) for _ in range(19)] + [f["power"]]
-
-    with dm1:
-        st.markdown(f"""<div class="metric-box">
-          <div class="metric-box-label">현재 온도</div>
-          <div class="metric-box-val">{f['temp']:.1f}<span class="metric-box-unit">°C</span></div>
-          <div class="metric-box-trend" style="color:{sc}">목표 {f['target']}°C</div>
-        </div>""", unsafe_allow_html=True)
-        st.plotly_chart(sparkline_fig(hdata, sc, 50), width="stretch", config={"displayModeBar": False})
-
-    with dm2:
-        st.markdown(f"""<div class="metric-box">
-          <div class="metric-box-label">현재 습도</div>
-          <div class="metric-box-val">{f['hum']}<span class="metric-box-unit">%RH</span></div>
-          <div class="metric-box-trend" style="color:#888780">기준 60~75%</div>
-        </div>""", unsafe_allow_html=True)
-        st.plotly_chart(sparkline_fig(phdata, "#1d9e75", 50), width="stretch", config={"displayModeBar": False})
-
-    with dm3:
-        st.markdown(f"""<div class="metric-box">
-          <div class="metric-box-label">전력 소비</div>
-          <div class="metric-box-val">{f['power']}<span class="metric-box-unit">kW</span></div>
-          <div class="metric-box-trend delta-ok">전일 대비 -8%</div>
-        </div>""", unsafe_allow_html=True)
-        st.plotly_chart(sparkline_fig(pwdata, "#ba7517", 50), width="stretch", config={"displayModeBar": False})
-
-    with dm4:
-        saving = round(f["power"] * 0.1)
-        pct_v  = round(f["power"] / 300 * 100)
-        st.markdown(f"""<div class="metric-box">
-          <div class="metric-box-label">임시</div>
-          <div class="metric-box-val">{saving}<span class="metric-box-unit">만원</span></div>
-          <div style="height:5px;background:#f1efe8;border-radius:3px;margin-top:10px;overflow:hidden">
-            <div style="width:{pct_v}%;height:5px;background:#ba7517;border-radius:3px"></div>
-          </div>
-          <div class="metric-box-trend" style="color:#854f0b">목표 대비 {pct_v}%</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-    da1, da2 = st.columns([1, 1.5])
-    with da1:
-        st.markdown('<div class="section-label">경보 현황</div>', unsafe_allow_html=True)
-        if not f["alarms"]:
-            st.markdown('<div style="font-size:12px;color:#b4b2a9;padding:4px 0 10px">현재 활성 경보 없음</div>', unsafe_allow_html=True)
-        else:
-            for alarm in f["alarms"]:
-                st.markdown(f"""
-                <div class="alarm-item" style="background:#faeeda;margin-bottom:4px">
-                  <div style="font-weight:500;color:#633806;font-size:12px">{alarm['msg']}</div>
-                  <div style="color:#854f0b;font-size:11px;margin-top:2px">{alarm['time']}</div>
-                </div>""", unsafe_allow_html=True)
-
-        st.markdown('<div class="section-label" style="margin-top:10px">설비 상태</div>', unsafe_allow_html=True)
-        eq_cols = st.columns(3)
-        for j, eq in enumerate(f["equip"]):
-            with eq_cols[j % 3]:
-                ec = status_color(eq["s"])
-                st.markdown(f"""
-                <div class="equip-item" style="margin-bottom:6px">
-                  <div class="equip-name">{eq['n']}</div>
-                  <div class="equip-val">{eq['v']}</div>
-                  <div style="font-size:10px;color:{ec};margin-top:2px">{status_text(eq['s'])}</div>
-                </div>""", unsafe_allow_html=True)
-
-    with da2:
-        st.markdown('<div class="section-label">온도 추이 (최근 1시간)</div>', unsafe_allow_html=True)
-        st.plotly_chart(temp_trend_fig(f), width="stretch", config={"displayModeBar": False})
+SCHEDULE = {
+    "냉동1": ["on","on","on","on","on","on","on","off","off","peak","peak","peak","peak","off","off","off","on","on","peak","peak","off","on","on","on"],
+    "냉동2": ["off","off","off","off","on","on","on","on","off","off","peak","peak","on","on","off","on","on","on","peak","off","off","off","off","off"],
+    "냉동3": ["on","on","off","off","off","on","on","on","on","on","peak","peak","off","off","on","on","on","peak","peak","off","off","on","on","on"],
+    "태양광": ["off","off","off","off","off","off","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","off","off","off","off","off","off"],
+    "요금대": ["off","off","off","off","off","off","off","off","off","peak","peak","peak","peak","peak","off","off","off","off","peak","peak","off","off","off","off"],
+}
 
 
-now = time.time()
-if now - st.session_state.last_tick > 3:
+# 세션 초기화
+
+def init_state():
+    defaults = {
+        "ctrl_log": ["14:22  시스템 자동 가동 시작", "13:45  냉동2 온도 경보 해제"],
+        "emergency": False,
+        "factories": [dict(f) for f in FACTORIES],
+        "power_kw": 847.0,
+        "solar_kw": 238.0,
+        "last_tick": time.time(),
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+init_state()
+
+
+# 실시간 시뮬레이션
+
+now_t = time.time()
+if now_t - st.session_state.last_tick > 3:
     st.session_state.power_kw = max(700, min(1050, st.session_state.power_kw + random.uniform(-8, 8)))
     st.session_state.solar_kw = max(180, min(360,  st.session_state.solar_kw + random.uniform(-3, 3)))
     for f in st.session_state.factories:
         f["temp"] = round(f["temp"] + random.uniform(-0.2, 0.2), 1)
-    st.session_state.last_tick = now
+    st.session_state.last_tick = now_t
 
 
-warn_count = sum(1 for f in st.session_state.factories if f["status"] in ("warn", "err"))
-warn_badge = badge_html(f"주의 {warn_count}건", "warn") if (warn_count or st.session_state.emergency) else ""
-emg_badge  = badge_html("비상 정지 활성화", "err") if st.session_state.emergency else ""
+# 차트 함수
 
-st.markdown(f"""
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:15px">
-  <div style="display:flex;align-items:center;gap:12px">
-    <div class="dash-logo"><span>냉동 공장</span></div>
-    <span><span class="live-dot"></span><span style="font-size:12px;color:#888780">LIVE</span></span>
-    {badge_html("시스템 정상", "ok")}
-    {warn_badge}
-    {emg_badge}
-  </div>
-  <div style="display:flex;align-items:center;gap:16px">
-    <span style="font-size:11px;color:#b4b2a9">냉동공장 에너지 절약 시스템</span>
-    <span style="font-size:12px;color:#888780;letter-spacing:.5px">{datetime.now().strftime('%H:%M:%S')}</span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+def sparkline_fig(data, color, height=50):
+    fill_color = hex_to_rgba(color, 0.08)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(y=data, mode="lines",
+        line=dict(color=color, width=1.8, shape="spline"),
+        fill="tozeroy", fillcolor=fill_color))
+    fig.update_layout(margin=dict(l=0,r=0,t=0,b=0), height=height,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(visible=False), yaxis=dict(visible=False), showlegend=False)
+    return fig
+
+def temp_trend_fig(f, n=20):
+    base = f["temp"]
+    data = [round(base + random.uniform(-0.8, 0.8), 1) for _ in range(n-1)] + [base]
+    clr  = bar_color(base, f["target"])
+    fig  = go.Figure()
+    fig.add_trace(go.Scatter(y=[f["target"]]*n, mode="lines",
+        line=dict(color="#e0e3ea", width=1, dash="dash"), showlegend=False))
+    fig.add_trace(go.Scatter(y=data, mode="lines+markers",
+        line=dict(color=clr, width=2, shape="spline"),
+        marker=dict(size=4, color=clr),
+        fill="tozeroy", fillcolor=hex_to_rgba(clr, 0.08), showlegend=False))
+    fig.update_layout(margin=dict(l=40,r=10,t=10,b=20), height=120,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(tickvals=[0,n-1], ticktext=["1시간 전","현재"],
+                   tickfont=dict(size=10,color="#b4b2a9"), gridcolor="rgba(0,0,0,0)"),
+        yaxis=dict(tickfont=dict(size=10,color="#888780"), gridcolor="#f1efe8"))
+    return fig
+
+def temp_predict_fig(factory_id, current_temp):
+    preds = get_temp_predictions(factory_id)
+    if not preds: return None
+    times     = [p["timestamp"][11:16] for p in preds]
+    predicted = [p["predicted_temperature_c"] for p in preds]
+    lower     = [p["lower_bound_c"] for p in preds]
+    upper     = [p["upper_bound_c"] for p in preds]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=times+times[::-1], y=upper+lower[::-1],
+        fill="toself", fillcolor="rgba(55,138,221,0.10)",
+        line=dict(color="rgba(0,0,0,0)"), name="신뢰구간"))
+    fig.add_trace(go.Scatter(x=times, y=predicted, mode="lines+markers",
+        line=dict(color="#378add", width=2, dash="dash"),
+        marker=dict(size=5), name="예측 온도"))
+    fig.add_hline(y=-18.0, line_dash="dot", line_color="#e24b4a",
+        annotation_text="목표 -18°C", annotation_font_size=10)
+    fig.update_layout(margin=dict(l=40,r=10,t=10,b=20), height=140,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.2, font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+        xaxis=dict(tickfont=dict(size=10,color="#888780"), gridcolor="rgba(0,0,0,0)"),
+        yaxis=dict(tickfont=dict(size=10,color="#888780"), gridcolor="#f1efe8", ticksuffix="°C"))
+    return fig
+
+def schedule_fig():
+    now_h = datetime.now().hour
+    rows  = list(SCHEDULE.keys())
+    z = [[{"on":1,"peak":2,"solar":3,"off":0}[p] for p in SCHEDULE[row]] for row in rows]
+    colorscale = [
+        [0.00,"#f1efe8"],[0.25,"#f1efe8"],
+        [0.25,"#378add"],[0.50,"#378add"],
+        [0.50,"#e24b4a"],[0.75,"#e24b4a"],
+        [0.75,"#639922"],[1.00,"#639922"],
+    ]
+    fig = go.Figure(go.Heatmap(z=z, x=[f"{h}h" for h in range(24)], y=rows,
+        colorscale=colorscale, zmin=0, zmax=3, showscale=False, xgap=1, ygap=2))
+    fig.add_vline(x=now_h-0.5, line_width=2, line_color="#1a1a2e", opacity=0.6)
+    fig.update_layout(margin=dict(l=60,r=10,t=10,b=30), height=170,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(tickvals=[0,6,12,18,23], ticktext=["0h","6h","12h","18h","24h"],
+                   tickfont=dict(size=10,color="#888780"), gridcolor="rgba(0,0,0,0)"),
+        yaxis=dict(tickfont=dict(size=11,color="#888780"), gridcolor="rgba(0,0,0,0)"))
+    return fig
 
 
-# 공장 정보
-pwr  = st.session_state.power_kw
-sol  = st.session_state.solar_kw
+# HTML 컴포넌트 함수
 
+def kpi_card(label, value, unit, sub, pct, accent, delta_text="", delta_kind="ok"):
+    bar = f'<div class="kpi-bar-wrap"><div class="kpi-bar-fill" style="width:{pct:.1f}%;background:{accent}"></div></div>'
+    delta = f'<div class="delta-{delta_kind}">{delta_text}</div>' if delta_text else ""
+    return f"""<div class="kpi-card" style="--accent:{accent}">
+      <div class="kpi-label">{label}</div>
+      <div class="kpi-value">{value}<span class="kpi-unit">{unit}</span></div>
+      {bar}<div class="kpi-sub">{sub}</div>{delta}</div>"""
+
+def env_weights_html():
+    ew = dummy_data.get("environment_weights",{})
+    icon = {"CLEAR":"☀️","CLOUDY":"⛅","RAINY":"🌧️"}.get(ew.get("weather_condition",""),"🌡️")
+    items = [
+        ("내일 날씨",   f"{icon} {ew.get('weather_condition','—')}"),
+        ("최고 기온",   f"{ew.get('max_temp_forecast_c','—')}°C"),
+        ("기온 가중치", f"w = {ew.get('w_temp','—')}"),
+        ("태양광 가중치",f"w = {ew.get('w_solar','—')}"),
+        ("갱신",        ew.get("updated_at","")[:16].replace("T"," ")),
+    ]
+    rows = "".join(
+        f'<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid #f1efe8">'
+        f'<span style="font-size:14px;font-weight:500;color:#515151">{k}</span>'
+        f'<span style="font-size:14px;color:#444441">{v}</span></div>'
+        for k,v in items)
+    return f'<div style="background:#fff;border:0.5px solid #e0e3ea;border-radius:8px;padding:10px"><div style="font-size:17px;font-weight:500;margin-bottom:7px">환경 정보</div>{rows}</div>'
+
+def maintenance_html():
+    items = dummy_data.get("predict_maintenance",[])
+    rows  = []
+    for m in items:
+        sc    = m["health_score"]
+        risk  = m["maintenance_risk"]
+        color = "#1d9e75" if risk=="LOW" else ("#ba7517" if risk=="MEDIUM" else "#e24b4a")
+        bg    = "#eaf3de" if risk=="LOW" else ("#faeeda" if risk=="MEDIUM" else "#fcebeb")
+        rows.append(f"""<div style="padding:8px 10px;background:{bg};border-radius:6px;margin-bottom:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+            <span style="font-size:15px;font-weight:500;color:#1a1a2e">공장 {m['factory_id']}</span>
+            <span style="font-size:16px;font-weight:600;color:{color}">{sc:.2f}</span>
+          </div>
+          <div style="height:5px;background:rgba(255,255,255,.5);border-radius:3px;overflow:hidden;margin-bottom:5px">
+            <div style="height:5px;width:{sc*100:.0f}%;background:{color};border-radius:3px"></div>
+          </div>
+          <div style="font-size:13px;color:#444441">{m['reason']}</div>
+          <div style="font-size:13px;font-weight:500;color:{color};margin-top:3px"> - {m['recommended_action']}</div>
+        </div>""")
+    return f'<div style="font-size:13px;color:#515151;margin-bottom:8px">1.0: 정상,  0.6 ▼ :  주의,  0.4 ▼ :  교체 권고</div>{"".join(rows)}'
+
+
+dash   = dummy_data.get("dashboard_summary",{})
+pwr    = st.session_state.power_kw
+sol    = st.session_state.solar_kw
+risk   = dash.get("risk_index", 0)
+rlevel = dash.get("risk_level","LOW")
+risk_color = "#e24b4a" if risk>80 else ("#ba7517" if risk>40 else "#1d9e75")
+daily_wan   = round(dash.get("estimated_daily_saving_krw",0)/10000)
+monthly_wan = round(dash.get("estimated_monthly_saving_krw",0)/10000)
+carbon      = dash.get("carbon_reduction_tco2_year",0)
+unacked     = get_all_unacked_alerts()
+
+warn_count = sum(1 for f in st.session_state.factories if f["status"] in ("warn","err"))
+
+# 최상단 경보 메시지 배너
+# if unacked:
+#     alert_items = "".join(
+#         f'<span style="display:inline-flex;align-items:center;gap:6px;'
+#         f'padding:4px 12px;background:#faeeda;border:0.5px solid #fac775;'
+#         f'border-radius:20px;font-size:11px;color:#854f0b;white-space:nowrap">'
+#         f'⚠ {a["message"][:40]}{"…" if len(a["message"])>40 else ""}'
+#         f'<span style="opacity:.6">{a["created_at"][11:16]}</span></span>'
+#         for a in unacked
+#     )
+#     st.markdown(
+#         f'<div style="display:flex;gap:8px;flex-wrap:wrap;padding:6px 0 10px">{alert_items}</div>',
+#         unsafe_allow_html=True
+#     )
+
+warn_badge = badge_html(f"주의 {warn_count}건","warn") if warn_count or st.session_state.emergency else ""
+emg_badge  = badge_html("비상 정지 활성화","err") if st.session_state.emergency else ""
+
+header_left, header_right = st.columns([8, 1])
+
+with header_left:
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <div class="dash-logo"><span>냉동 공장</span></div>
+      <span><span class="live-dot"></span><span style="font-size:12px;color:#888780">LIVE</span></span>
+      {badge_html("시스템 정상","ok")}
+      {warn_badge}
+      {emg_badge}
+      <span style="font-size:12px;color:#888780;letter-spacing:.5px;margin-left:4px">
+        {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+      </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+with header_right:
+    notification_popover(dummy_data, unacked)
+
+# KPI 카드 4개
 k1, k2, k3, k4 = st.columns(4)
 with k1:
     st.markdown(kpi_card("현재 전력 소비", f"{pwr:.0f}", "kW",
-        f"계약 한도 1,200 kW", pwr / 12, "#378add",
-        f"12% 하락 ", "ok"), unsafe_allow_html=True)
+        f"계약 한도 1,200 kW · {dash.get('running_factories',0)}/{dash.get('total_factories',0)}공장 가동",
+        pwr/12, "#378add", "전일 대비 -12%", "ok"), unsafe_allow_html=True)
 with k2:
     st.markdown(kpi_card("태양광 발전", f"{sol:.0f}", "kW",
-        "이달 발전량 38,200 kWh", sol / 3.6, "#639922",
-        f"자가소비율 {sol/pwr*100:.1f}%", "ok"), unsafe_allow_html=True)
+        "이달 발전량 38,200 kWh",
+        sol/3.6, "#639922", f"자가소비율 {sol/pwr*100:.1f}%", "ok"), unsafe_allow_html=True)
 with k3:
-    st.markdown(kpi_card("절감액", "84", "만원",
-        "이달 누적 1,847만원", 91.3, "#ba7517"), unsafe_allow_html=True)
+    st.markdown(kpi_card("일일 절감액", f"{daily_wan}", "만원",
+        f"이달 누적 {monthly_wan}만원",
+        min(100, daily_wan/2), "#ba7517",
+        f"연간 탄소 감축 {carbon}tCO₂", "ok"), unsafe_allow_html=True)
 with k4:
-    st.markdown(kpi_card("임시", "4.2", "톤",
-        "임시", 60, "#534ab7"), unsafe_allow_html=True)
+    st.markdown(kpi_card("리스크 지수", f"{risk}", "",
+        f"수준: {rlevel}  ·  통신: {dash.get('communication_status','')}",
+        risk, risk_color,
+        "즉각 조치 필요" if risk>80 else ""), unsafe_allow_html=True)
 
+st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+
+main_col, side_col = st.columns([3.2, 1], gap="large")
+
+
+# 우측
+with side_col:
+
+    # 설비 상태 분석
+    st.markdown('<div class="card-title">설비 상태 분석</div>', unsafe_allow_html=True)
+    st.markdown(maintenance_html(), unsafe_allow_html=True)
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.divider()
+
+    # 환경 정보
+    st.markdown(env_weights_html(), unsafe_allow_html=True)
+
+
+# tabs
+with main_col:
+    st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+
+    tab1, tab2, tab3, tab4 = st.tabs(["공장 현황", "에너지·비용", "운영 관리", "수동 제어"])
+
+    # 공장 현황
+    with tab1:
+        factory_status(
+            get_maintenance_info,
+            temp_pct,
+            bar_color,
+            status_color,
+            status_bg,
+            status_text,
+            lambda f: factory_detail(
+                f,
+                status_color,
+                status_bg,
+                status_text,
+                get_maintenance_info,
+                sparkline_fig,
+                temp_predict_fig,
+                temp_trend_fig,
+            ),
+            log_action,
+        )
+
+    # 에너지 비용
+    with tab2:
+        energy_cost(dummy_data)
+
+    # 운영 관리
+    with tab3:
+        operation_manage(dummy_data, schedule_fig)
+    
+    # 수동 제어 
+    with tab4:
+        manual_control(log_action)
+        
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-st.markdown(
-    '<div class="card-title" style="margin:10px 0 8px 2px">공장 상태</div>',
-    unsafe_allow_html=True
-)
-
-fc_cols = st.columns(4)
-
-for i, (col, f) in enumerate(zip(fc_cols, st.session_state.factories)):
-    with col:
-        pct    = temp_pct(f["temp"], f["min_temp"], f["max_temp"])
-        bclr   = bar_color(f["temp"], f["target"])
-        sc     = status_color(f["status"])
-        sb     = status_bg(f["status"])
-        st_txt = status_text(f["status"])
-
-        with st.container(key=f"factory_card_{i}"):
-            st.markdown(f"""
-            <div class="factory-card-inner">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
-                <div>
-                <div class="fc-name">{f['name']}</div>
-                </div>
-                <span class="badge" style="background:{sb};color:{sc}">{st_txt}</span>
-            </div>
-
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:4px">
-                <div class="fc-metric-box">
-                    <div class="fc-metric-label">온도</div>
-                    <div class="fc-temp-row">
-                        <span class="fc-metric-val">{f['temp']:.1f}<span class="fc-metric-unit">°C</span></span>
-                        <span class="fc-target-text">목표 {f['target']}°C</span>
-                    </div>
-                </div>
-                <div class="fc-metric-box">
-                <div class="fc-metric-label">습도</div>
-                <div class="fc-metric-val">{f['hum']}<span class="fc-metric-unit">%</span></div>
-                </div>
-            </div>
-
-            <div class="fc-bar-wrap">
-                <div style="height:4px;border-radius:2px;background:{bclr};width:{pct:.1f}%"></div>
-            </div>
-
-            <div class="fc-footer">
-                <span>전력 <b>{f['power']} kW</b></span>
-            </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-            btn_col1, btn_col2 = st.columns(2)
-
-            with btn_col1:
-                if st.button("상세 보기", key=f"fcbtn_{i}", width="stretch", type="secondary"):
-                    show_factory_detail(st.session_state.factories[i])
-
-            with btn_col2:
-                if st.button("긴급 정지", key=f"stopbtn_{i}", width="stretch"):
-                    st.session_state.emergency = True
-                    log_action(f"{f['name']} 긴급 정지")
-                    st.rerun()
-                    
-
-# 하단
-bc1, bc2, bc3 = st.columns([1.7, 1, 1])
-
-with bc1:
-    st.markdown('<div class="card-title">가동 스케줄 (24시간)</div>', unsafe_allow_html=True)
-    st.plotly_chart(schedule_fig(), width="stretch", config={"displayModeBar": False})
-    st.markdown("""
-    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:-8px">
-      <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#888780">
-        <span style="width:12px;height:8px;background:#378add;border-radius:2px;display:inline-block"></span>가동
-      </div>
-      <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#888780">
-        <span style="width:12px;height:8px;background:#e24b4a;border-radius:2px;display:inline-block"></span>피크요금
-      </div>
-      <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#888780">
-        <span style="width:12px;height:8px;background:#639922;border-radius:2px;display:inline-block"></span>태양광
-      </div>
-      <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#888780">
-        <span style="width:12px;height:8px;background:#f1efe8;border:0.5px solid #e0e3ea;border-radius:2px;display:inline-block"></span>대기
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with bc2:
-    st.markdown('<div class="card-title">누적 절감액</div>', unsafe_allow_html=True)
-    tab_m, tab_d = st.tabs(["월별", "일별"])
-    with tab_m:
-        st.plotly_chart(savings_fig("monthly"), width="stretch", config={"displayModeBar": False})
-    with tab_d:
-        st.plotly_chart(savings_fig("daily"), width="stretch", config={"displayModeBar": False})
-    st.markdown("""
-    <div style="border-top:0.5px solid #e0e3ea;padding-top:8px;display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:11px;color:#888780">연간 누적</span>
-      <span style="font-size:16px;font-weight:500;color:#185fa5">₩1억 2,340만</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-with bc3:
-    st.markdown('<div class="card-title">긴급 수동 제어</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style="background:#faeeda;border:0.5px solid #fac775;border-radius:6px;
-                padding:7px 10px;font-size:11px;color:#854f0b;margin-bottom:10px">
-      수동 제어 시 자동 스케줄이 일시 중지됩니다
-    </div>
-    """, unsafe_allow_html=True)
-
-    cb1, cb2 = st.columns(2)
-    with cb1:
-        if st.button("비상 정지", key="btn_stop", width="stretch"):
-            st.session_state.emergency = True
-            log_action("비상 정지")
-            st.rerun()
-        if st.button("제상 히팅", key="btn_heat", width="stretch"):
-            log_action("제상 히팅")
-            st.rerun()
-    with cb2:
-        if st.button("강제 냉각", key="btn_cool", width="stretch"):
-            log_action("강제 냉각")
-            st.rerun()
-        if st.button("복구", key="btn_auto", width="stretch"):
-            st.session_state.emergency = False
-            log_action("복구")
-            st.rerun()
-
-    if st.session_state.emergency:
-        st.markdown('<div class="emg-banner">비상 정지 활성화</div>', unsafe_allow_html=True)
-
-    st.markdown('<div style="margin-top:8px"><div style="font-size:11px;font-weight:500;color:#888780;margin-bottom:5px">제어 내역</div>', unsafe_allow_html=True)
-    log_html = "".join(
-        f'<div><span class="log-time">{line.split("  ")[0]}</span>{("  ".join(line.split("  ")[1:]) if "  " in line else line)}</div>'
-        for line in st.session_state.ctrl_log[:8]
-    )
-    st.markdown(f'<div class="log-box">{log_html}</div></div>', unsafe_allow_html=True)
-
-st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-#time.sleep(3)
-#st.rerun()

@@ -390,3 +390,117 @@
   color: #888780;
   margin-left: 13px;
 }
+
+div[class*="st-key-stopbtn_"] button {
+  background-color: #eb585a !important;
+  border-color: #eb585a !important;
+  color: white !important;
+}
+
+div[class*="st-key-stopbtn_"] button:hover {
+  background-color: #eb585a !important;
+  border-color: #eb585a !important;
+  color: white !important;
+}
+
+div[class*="st-key-recoverbtn_"] button {
+  background-color: #59ba64 !important;
+  border-color: #59ba64 !important;
+  color: white !important;
+}
+
+div[class*="st-key-recoverbtn_"] button:hover {
+  background-color: #59ba64 !important;
+  border-color: #59ba64 !important;
+  color: white !important;
+}
+
+.alert-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 26px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+  border: 1px solid transparent;
+}
+
+.alert-card.unacked-err {
+  background: #fff0f0;
+  border-color: #f5c6c6;
+}
+
+.alert-card.unacked-warn {
+  background: #fff8f0;
+  border-color: #f5ddb0;
+}
+
+.alert-card.unacked-info {
+  background: #f0f6ff;
+  border-color: #b8d4f5;
+}
+
+.alert-card.acked {
+  background: #f6f6f8;
+  border-color: #e8e8ec;
+  opacity: 0.7;
+}
+
+.alert-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.alert-title {
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+.alert-meta {
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+  padding-left: 18px;
+}
+
+.alert-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.alert-badge.unacked {
+  background: #fde8e8;
+  color: #e24b4a;
+}
+
+.alert-badge.acked {
+  background: #eef0f5;
+  color: #888;
+}
+
+.alert-sub-message {
+  font-size: 12px;
+  font-weight: 500;
+  color: #777;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.cool-btn + div button {
+  background: #378add !important;
+  color: white !important;
+}
