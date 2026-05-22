@@ -4,12 +4,15 @@ from pathlib import Path
 import sys
 import os
 import requests
+import json5
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent
 sys.path.append(str(BASE_DIR))
 load_dotenv(ROOT_DIR / ".env", override=False)
+MOCK_MODE = True
+MOCK_DATA_PATH = ROOT_DIR / "backend" / "database" / "dummy_data.jsonc"
 
 
 st.set_page_config(
@@ -54,6 +57,42 @@ def _format_time(value):
 
 @st.cache_data(ttl=5)
 def get_factory_data(token: str):
+    if MOCK_MODE:
+        with open(MOCK_DATA_PATH, "r", encoding="utf-8") as f:
+            mock = json5.load(f)
+
+        factory = mock["factories"][0]
+
+        return {
+            "factory_id": factory["factory_id"],
+            "node_id": factory.get("node_id"),
+            "factory_name": factory["name"],
+            "status": factory["status"],
+            "temp_now": factory["temperature_c"],
+            "humidity": factory["humidity_pct"],
+            "updated": _format_time(factory.get("last_seen_at")),
+            "peltier": {
+                "state": factory["status"],
+                "running": factory["pwm_pct"] > 0,
+                "duty": factory["pwm_pct"],
+                "direction": "COOL",
+                "fan_on": factory["pwm_pct"] > 0,
+                "bridge_enabled": factory["pwm_pct"] > 0,
+                "last_action": "MOCK",
+                "last_command_id": "mock_001",
+                "updated_at": factory.get("last_seen_at"),
+                "last_error": None,
+            },
+            "history": [
+                {
+                    "timestamp": row["timestamp"],
+                    "temperature_c": row["temperature_c"],
+                }
+                for row in mock["sensor_logs"]
+                if row["factory_id"] == factory["factory_id"]
+            ],
+        }
+
     url = f"{API_BASE_URL}/api/v1/readonly/{token}"
 
     response = requests.get(url, timeout=5)
