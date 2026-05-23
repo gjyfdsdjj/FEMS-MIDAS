@@ -1,3 +1,12 @@
+"""APScheduler background jobs for MIDAS backend.
+
+현재 단계는 데모 중심이며, Job A(30분 주기 최적화) 중심으로 동작한다.
+DB/MQTT/실예측이 없는 환경에서도 더미 데이터로 1회 실행 검증이 가능하도록
+폴백 로직을 포함한다.
+"""
+
+# -----------------------------------------------------------------------------
+# [원본 설계 주석 - 보존]
 # backend/scheduler/jobs.py
 # APScheduler 백그라운드 작업 정의
 #
@@ -29,3 +38,1003 @@
 #   3. 중복 알림 window 확인 (300초 내 동일 factory + type 중복 차단)
 #   4. Telegram 발송 (alert_service.send_telegram)
 #   5. alerts 테이블 기록
+#
+# [현재 구현 매핑]
+# - Job A 본체: run_job_a_optimization()
+#   - 1~5번 입력 조합: _active_job / _available_factories / get_tou_price /
+#                      _solar_forecast_for_horizon
+#   - 6번 최적화 호출: _run_optimization_with_fallback()
+#   - 7~9번 결과 처리: run_job_a_optimization()의 result/log 구간
+# - Job B/C: run_job_b_update_environment_weights(), run_job_c_monitor_alerts()
+#   (현재 스텁, 후속 구현 대상)
+# -----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import asyncio
+import os
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+import importlib
+import json
+from pathlib import Path
+from typing import Any
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - optional dependency fallback
+    load_dotenv = None  # type: ignore
+
+if load_dotenv is not None:
+    # 로컬 시크릿(.env.local)을 우선 로드하고, 없으면 기본 .env도 함께 허용한다.
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env.local", override=False)
+    load_dotenv(override=False)
+
+try:
+    from backend.services import tou_service
+except Exception:  # pragma: no cover - optional integration fallback
+    try:
+        from services import tou_service  # type: ignore
+    except Exception:
+        tou_service = None  # type: ignore
+
+try:
+    from backend.services import weather_service
+except Exception:  # pragma: no cover - optional integration fallback
+    try:
+        from services import weather_service  # type: ignore
+    except Exception:
+        weather_service = None  # type: ignore
+
+try:
+    from backend.services import prediction_service
+except Exception:  # pragma: no cover - optional integration fallback
+    try:
+        from services import prediction_service  # type: ignore
+    except Exception:
+        prediction_service = None  # type: ignore
+
+try:
+    from backend.services import optimization_service  # type: ignore
+except Exception:
+    try:
+        from services import optimization_service  # type: ignore
+    except Exception:
+        optimization_service = None  # type: ignore
+
+try:
+    from backend.services import anomaly_service
+except Exception:
+    anomaly_service = None # type: ignore
+
+
+try:
+    _aps_module = importlib.import_module("apscheduler.schedulers.background")
+    BackgroundScheduler = _aps_module.BackgroundScheduler
+except Exception:  # pragma: no cover - optional dependency fallback
+    BackgroundScheduler = None
+
+DEFAULT_DUMMY_DATA_PATH = (
+    Path(__file__).resolve().parents[1] / "database" / "dummy_data.jsonc"
+)
+
+_SCHEDULER: Any | None = None
+_LAST_JOB_A_RESULT: dict[str, Any] | None = None
+_JOB_A_LOGS: list[dict[str, Any]] = []
+
+
+@dataclass
+class JobAContext:
+    """Job A 최적화 1회 실행에 필요한 입력 스냅샷을 묶는다."""
+
+    now: datetime
+    active_job: dict[str, Any]
+    factories: list[dict[str, Any]]
+    tou_price: float
+    tou_slots: list[dict[str, Any]]
+    env_weights: dict[str, Any]
+    solar_forecast: list[dict[str, Any]]
+    outdoor_temp_forecast: list[dict[str, Any]]
+
+
+class _FallbackScheduler:
+    """APScheduler 미설치 환경용 최소 대체 스케줄러."""
+
+    def __init__(self) -> None:
+        self._jobs: list[dict[str, Any]] = []
+        self._running = False
+
+    def add_job(
+        self,
+        func: Any,
+        trigger: str,
+        minute: str,
+        id: str,
+        replace_existing: bool = True,
+    ) -> None:
+        """크론 트리거 Job 메타데이터를 내부 목록에 등록한다."""
+        if replace_existing:
+            self._jobs = [job for job in self._jobs if job["id"] != id]
+        self._jobs.append(
+            {
+                "id": id,
+                "func": func,
+                "trigger": trigger,
+                "minute": minute,
+            }
+        )
+
+    def get_jobs(self) -> list[dict[str, Any]]:
+        """등록된 Job 메타데이터 목록을 반환한다."""
+        return list(self._jobs)
+
+    def start(self) -> None:
+        """폴백 스케줄러를 '실행 중' 상태로 표시한다."""
+        self._running = True
+
+    def shutdown(self, wait: bool = False) -> None:  # noqa: ARG002
+        """폴백 스케줄러를 중지 상태로 표시한다."""
+        self._running = False
+
+
+def _strip_jsonc_comments(text: str) -> str:
+    """JSONC에서 // 주석만 제거한다 (문자열 내부는 유지)."""
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    i = 0
+    n = len(text)
+
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "/":
+            while i < n and text[i] not in "\r\n":
+                i += 1
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
+def load_dummy_data(path: Path = DEFAULT_DUMMY_DATA_PATH) -> dict[str, Any]:
+    """JSONC 형식 더미 데이터를 로드해 dict로 반환한다."""
+    raw = path.read_text(encoding="utf-8")
+    clean = _strip_jsonc_comments(raw)
+    return json.loads(clean)
+
+
+def _parse_iso(dt_str: str | None) -> datetime | None:
+    """ISO 8601 문자열을 datetime으로 파싱한다 (없으면 None)."""
+    if not dt_str:
+        return None
+    return datetime.fromisoformat(dt_str)
+
+
+def _resolve_now(data: dict[str, Any], now: datetime | None = None) -> datetime:
+    """주어진 now 또는 더미의 dashboard_summary.current_time 기준으로 기준 시각을 정한다."""
+    if now is not None:
+        return now
+    summary_now = (
+        data.get("dashboard_summary", {}).get("current_time")
+        if isinstance(data.get("dashboard_summary"), dict)
+        else None
+    )
+    parsed = _parse_iso(summary_now)
+    return parsed or datetime.now()
+
+
+def _hour_in_slot(hour: int, start: int, end: int) -> bool:
+    """시(hour)가 TOU 슬롯(start_hour~end_hour)에 속하는지 판정한다."""
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
+
+
+def _dummy_tou_price(now: datetime, pricing_tou: dict[str, Any]) -> float:
+    """더미 pricing_tou 슬롯 기준 TOU 단가(원/kWh)를 계산한다."""
+    hour = now.hour
+    for slot in pricing_tou.get("slots", []):
+        start = int(slot.get("start_hour", 0))
+        end = int(slot.get("end_hour", 0))
+        if _hour_in_slot(hour, start, end):
+            return float(slot.get("price", 0))
+    return float(pricing_tou.get("current_price_krw_per_kwh", 0))
+
+
+def get_tou_price_with_source(now: datetime, pricing_tou: dict[str, Any]) -> tuple[float, str]:
+    """현재 시각 TOU 단가와 소스(service/dummy)를 함께 반환한다."""
+    use_service_tou = bool(pricing_tou.get("use_service_tou", True))
+    if use_service_tou and tou_service is not None:
+        try:
+            return float(tou_service.get_tou_price_krw_per_kwh(now)), "SERVICE"
+        except Exception:
+            pass
+    return _dummy_tou_price(now, pricing_tou), "DUMMY"
+
+
+def get_tou_price(now: datetime, pricing_tou: dict[str, Any]) -> float:
+    """현재 시각에 해당하는 TOU 단가(원/kWh)를 계산한다."""
+    price, _ = get_tou_price_with_source(now, pricing_tou)
+    return price
+
+
+def _active_job(data: dict[str, Any]) -> dict[str, Any] | None:
+    """더미 데이터에서 활성화된 동적 스케줄링 Job 1건을 찾는다."""
+    for job in data.get("jobs", []):
+        if job.get("is_active") and job.get("dynamic_scheduling_enabled", True):
+            return job
+    return None
+
+
+def _available_factories(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """manual_stop이 아닌 공장들만 골라 가동 후보 공장 목록을 만든다."""
+    result: list[dict[str, Any]] = []
+    for factory in data.get("factories", []):
+        if factory.get("manual_stop"):
+            continue
+        result.append(factory)
+    return result
+
+
+def _solar_forecast_for_horizon(
+    data: dict[str, Any],
+    now: datetime,
+    deadline: datetime | None,
+) -> list[dict[str, Any]]:
+    """현재 시각부터 deadline까지 구간에 해당하는 태양광 예측 행들을 필터링한다."""
+    if deadline is None or deadline <= now:
+        deadline = now + timedelta(hours=24)
+    rows: list[dict[str, Any]] = []
+    for row in data.get("predict_solar", []):
+        ts = _parse_iso(row.get("timestamp"))
+        if ts is None:
+            continue
+        if now <= ts <= deadline:
+            rows.append(row)
+    return rows
+
+
+def _normalize_ts_for_compare(ts: datetime, ref: datetime) -> datetime:
+    """aware/naive 혼용 비교를 피하기 위해 기준 시각(ref) 형태로 정규화한다."""
+    if ref.tzinfo is None and ts.tzinfo is not None:
+        return ts.replace(tzinfo=None)
+    if ref.tzinfo is not None and ts.tzinfo is None:
+        return ts.replace(tzinfo=ref.tzinfo)
+    return ts
+
+
+def _service_solar_forecast_for_horizon(
+    now: datetime,
+    deadline: datetime | None,
+    env_weights: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """prediction_service.predict_solar를 사용해 horizon 범위 태양광 예측을 구성한다."""
+    if prediction_service is None or not hasattr(prediction_service, "predict_solar"):
+        return []
+
+    if deadline is None or deadline <= now:
+        deadline = now + timedelta(hours=24)
+
+    lat = float(env_weights.get("kma_lat", 37.5))
+    lon = float(env_weights.get("kma_lon", 127.0))
+
+    start_day = now.date()
+    end_day = deadline.date()
+    day_cursor = start_day
+    rows: list[dict[str, Any]] = []
+
+    while day_cursor <= end_day:
+        target = day_cursor.strftime("%Y%m%d")
+        try:
+            daily_rows = asyncio.run(
+                prediction_service.predict_solar(
+                    target_date=target,
+                    lat=lat,
+                    lon=lon,
+                )
+            )
+        except Exception:
+            daily_rows = []
+
+        for row in daily_rows:
+            if not isinstance(row, dict):
+                continue
+            ts = _parse_iso(row.get("timestamp"))
+            if ts is None:
+                continue
+            ts_cmp = _normalize_ts_for_compare(ts, now)
+            if now <= ts_cmp <= deadline:
+                rows.append(
+                    {
+                        "timestamp": ts.isoformat(),
+                        "predicted_solar_kwh": float(row.get("predicted_solar_kwh", 0.0)),
+                    }
+                )
+
+        day_cursor += timedelta(days=1)
+
+    rows.sort(key=lambda x: str(x.get("timestamp", "")))
+    return rows
+
+
+def _resolve_prophet_alpha_override(
+    env_weights: dict[str, Any],
+    actual: list[dict[str, Any]],
+    nwp: list[dict[str, Any]],
+    fallback_window: int,
+    *,
+    daily_alpha_series_fn: Any,
+) -> tuple[float | None, dict[str, Any] | None]:
+    """``use_solar_prophet_alpha`` 가 true일 때 Prophet α 예측을 시도한다.
+
+    실패·미설치·일수 부족 시 ``(None, meta)`` 로 폴백(=apply_solar_calibration에서
+    rolling mean α가 사용됨). Job A 결과 meta에는 항상 Prophet 메타가 함께 실린다.
+    """
+    if not env_weights.get("use_solar_prophet_alpha"):
+        return None, None
+
+    try:
+        from backend.services.solar_prophet import forecast_alpha_for_date
+    except ImportError:
+        try:
+            from services.solar_prophet import forecast_alpha_for_date  # type: ignore
+        except ImportError:
+            return None, {
+                "alpha_forecast": None,
+                "source": "module_unavailable",
+                "error": "solar_prophet import failed",
+            }
+
+    try:
+        prophet_window = int(env_weights.get("solar_prophet_window_days", fallback_window))
+    except (TypeError, ValueError):
+        prophet_window = fallback_window
+    try:
+        min_rows = int(env_weights.get("solar_prophet_min_rows", 14))
+    except (TypeError, ValueError):
+        min_rows = 14
+
+    series = daily_alpha_series_fn(actual, nwp)
+    prophet_meta = forecast_alpha_for_date(
+        series,
+        window_days=prophet_window,
+        min_rows=min_rows,
+    )
+    alpha_forecast = prophet_meta.get("alpha_forecast")
+    override = (
+        float(alpha_forecast)
+        if isinstance(alpha_forecast, (int, float)) and float(alpha_forecast) > 0
+        else None
+    )
+    return override, prophet_meta
+
+
+def _apply_solar_calibration_from_data(
+    data: dict[str, Any],
+    env_weights: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """일별 실측·NWP 쌍으로 1차 보정(scale / residual_mean / scale_and_residual).
+
+    ``use_solar_prophet_alpha`` 가 true이면 ``solar_prophet.forecast_alpha_for_date``
+    결과를 ``apply_solar_calibration(alpha_override=...)`` 로 전달해 rolling mean α를
+    대체한다. Prophet 메타는 ``meta["prophet"]`` 에 보관(실측·디버깅용).
+    """
+    if not env_weights.get("use_dummy_solar_calibration"):
+        return rows, None
+    try:
+        from backend.services.solar_calibration import (
+            apply_solar_calibration,
+            calibration_daily_rows_from_data,
+            daily_alpha_series,
+            parse_calibration_mode,
+        )
+    except ImportError:
+        try:
+            from services.solar_calibration import (
+                apply_solar_calibration,
+                calibration_daily_rows_from_data,
+                daily_alpha_series,
+                parse_calibration_mode,
+            )
+        except ImportError:
+            return rows, None
+
+    actual, nwp = calibration_daily_rows_from_data(data, env_weights)
+    if not actual or not nwp or not rows:
+        return rows, None
+    try:
+        window = int(env_weights.get("solar_calibration_window_days", 30))
+    except (TypeError, ValueError):
+        window = 30
+    dist = str(env_weights.get("solar_calibration_residual_distribution", "proportional"))
+    if dist not in ("proportional", "uniform"):
+        dist = "proportional"
+    mode = parse_calibration_mode(env_weights)
+
+    alpha_override, prophet_meta = _resolve_prophet_alpha_override(
+        env_weights,
+        actual,
+        nwp,
+        fallback_window=window,
+        daily_alpha_series_fn=daily_alpha_series,
+    )
+
+    rows_out, meta = apply_solar_calibration(
+        rows,
+        actual,
+        nwp,
+        mode=mode,
+        window_days=window,
+        residual_distribution=dist,  # type: ignore[arg-type]
+        alpha_override=alpha_override,
+    )
+    if prophet_meta is not None:
+        meta["prophet"] = prophet_meta
+    if not meta.get("applied"):
+        return rows, None
+    return rows_out, meta
+
+
+def _resolve_solar_forecast(
+    data: dict[str, Any],
+    now: datetime,
+    deadline: datetime | None,
+    env_weights: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str, dict[str, Any] | None]:
+    """태양광 예측 입력을 서비스 우선으로 구성하고 실패 시 더미로 폴백한다."""
+    use_service_solar = bool(env_weights.get("use_service_solar", True))
+    rows: list[dict[str, Any]]
+    src: str
+    if use_service_solar:
+        service_rows = _service_solar_forecast_for_horizon(
+            now=now,
+            deadline=deadline,
+            env_weights=env_weights,
+        )
+        if service_rows:
+            rows, src = service_rows, "SERVICE"
+        else:
+            rows = _solar_forecast_for_horizon(data, now, deadline)
+            src = "DUMMY"
+    else:
+        rows = _solar_forecast_for_horizon(data, now, deadline)
+        src = "DUMMY"
+    rows, cal_meta = _apply_solar_calibration_from_data(data, env_weights, rows)
+    return rows, src, cal_meta
+
+
+def _outdoor_temp_forecast_for_horizon(
+    data: dict[str, Any],
+    now: datetime,
+    deadline: datetime | None,
+) -> list[dict[str, Any]]:
+    """현재 시각부터 deadline까지 구간의 시간대별 외기온 예측 행을 필터링한다."""
+    if deadline is None or deadline <= now:
+        deadline = now + timedelta(hours=24)
+    rows: list[dict[str, Any]] = []
+    for row in data.get("predict_outdoor_temp_hourly", []):
+        ts = _parse_iso(row.get("timestamp"))
+        if ts is None:
+            continue
+        if now <= ts <= deadline:
+            rows.append(row)
+    return rows
+
+
+def _service_outdoor_temp_forecast_for_horizon(
+    now: datetime,
+    deadline: datetime | None,
+    env_weights: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """KMA 서비스 예보를 optimization 입력 포맷(timestamp/temp_c)으로 변환한다."""
+    if weather_service is None:
+        return []
+
+    if deadline is None or deadline <= now:
+        deadline = now + timedelta(hours=24)
+
+    nx = int(env_weights.get("kma_nx", 60))
+    ny = int(env_weights.get("kma_ny", 127))
+
+    try:
+        today_rows = asyncio.run(weather_service.fetch_today_forecast(nx=nx, ny=ny))
+        tomorrow_rows = asyncio.run(weather_service.fetch_tomorrow_forecast(nx=nx, ny=ny))
+    except Exception:
+        return []
+
+    converted: list[dict[str, Any]] = []
+    for row in [*today_rows, *tomorrow_rows]:
+        if not isinstance(row, dict):
+            continue
+        date_raw = str(row.get("date", ""))
+        hour_raw = str(row.get("hour", "")).zfill(2)
+        temp_raw = row.get("temperature_c")
+        if len(date_raw) != 8 or not date_raw.isdigit():
+            continue
+        if len(hour_raw) < 2 or not hour_raw[:2].isdigit():
+            continue
+        try:
+            ts = datetime(
+                year=int(date_raw[0:4]),
+                month=int(date_raw[4:6]),
+                day=int(date_raw[6:8]),
+                hour=int(hour_raw[:2]),
+                minute=0,
+                second=0,
+                tzinfo=now.tzinfo,
+            )
+            temp_c = float(temp_raw)
+        except (TypeError, ValueError):
+            continue
+        if now <= ts <= deadline:
+            converted.append({"timestamp": ts.isoformat(), "temp_c": temp_c})
+
+    converted.sort(key=lambda x: str(x.get("timestamp", "")))
+    return converted
+
+
+def _resolve_outdoor_temp_forecast(
+    data: dict[str, Any],
+    now: datetime,
+    deadline: datetime | None,
+    env_weights: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str]:
+    """외기온 예보 입력을 서비스 우선으로 구성하고 실패 시 더미로 폴백한다."""
+    use_service_weather = bool(env_weights.get("use_service_weather", True))
+    if use_service_weather:
+        service_rows = _service_outdoor_temp_forecast_for_horizon(
+            now=now,
+            deadline=deadline,
+            env_weights=env_weights,
+        )
+        if service_rows:
+            return service_rows, "SERVICE"
+    return _outdoor_temp_forecast_for_horizon(data, now, deadline), "DUMMY"
+
+
+def _planned_inbound_by_factory(
+    data: dict[str, Any],
+    job_id: str | None,
+    available_factory_ids: set[int],
+) -> dict[int, float]:
+    """더미의 production_allocations에서 공장별 입고 총량 계획을 읽어온다."""
+    if not job_id:
+        return {}
+    result: dict[int, float] = {}
+    for row in data.get("production_allocations", []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("job_id")) != str(job_id):
+            continue
+        try:
+            factory_id = int(row.get("factory_id"))
+        except (TypeError, ValueError):
+            continue
+        if factory_id not in available_factory_ids:
+            continue
+        planned_units = float(row.get("planned_inbound_units_until_deadline", 0.0) or 0.0)
+        result[factory_id] = max(0.0, planned_units)
+    return result
+
+
+def _planned_shipment_by_factory(
+    data: dict[str, Any],
+    job_id: str | None,
+    available_factory_ids: set[int],
+) -> dict[int, float]:
+    """더미의 shipment_allocations에서 공장별 출고 총량 계획을 읽어온다."""
+    if not job_id:
+        return {}
+    result: dict[int, float] = {}
+    for row in data.get("shipment_allocations", []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("job_id")) != str(job_id):
+            continue
+        try:
+            factory_id = int(row.get("factory_id"))
+        except (TypeError, ValueError):
+            continue
+        if factory_id not in available_factory_ids:
+            continue
+        planned_units = float(row.get("planned_shipment_units_until_deadline", 0.0) or 0.0)
+        result[factory_id] = max(0.0, planned_units)
+    return result
+
+
+def _door_open_count_by_factory(
+    data: dict[str, Any],
+    now: datetime,
+    horizon_end: datetime,
+    available_factory_ids: set[int],
+) -> dict[int, int]:
+    """현재 슬롯(now~horizon_end)의 공장별 문열림 횟수를 집계한다."""
+    counts = {factory_id: 0 for factory_id in available_factory_ids}
+    for row in data.get("door_open_events", []):
+        if not isinstance(row, dict):
+            continue
+        ts = _parse_iso(row.get("timestamp"))
+        if ts is None or not (now <= ts < horizon_end):
+            continue
+        try:
+            factory_id = int(row.get("factory_id"))
+        except (TypeError, ValueError):
+            continue
+        if factory_id not in counts:
+            continue
+        counts[factory_id] += 1
+    return counts
+
+
+def _heuristic_blocks(ctx: JobAContext) -> list[dict[str, Any]]:
+    """PuLP 미구현 시 데모용으로 간단한 휴리스틱 스케줄 블록을 생성한다."""
+    blocks: list[dict[str, Any]] = []
+    active_deadline = _parse_iso(ctx.active_job.get("deadline_at"))
+    end = active_deadline if active_deadline and active_deadline > ctx.now else ctx.now + timedelta(hours=1)
+    for factory in ctx.factories:
+        mode = "ON"
+        reason = "BASE_LOAD"
+        status = str(factory.get("status", ""))
+        if status == "WARNING":
+            mode = "ON"
+            reason = "TEMP_RECOVERY"
+        elif ctx.tou_price >= 180:
+            mode = "COASTING"
+            reason = "PEAK_AVOID"
+        solar_bonus = 0.0
+        if ctx.solar_forecast:
+            solar_bonus = float(ctx.solar_forecast[0].get("predicted_solar_kwh", 0.0))
+        blocks.append(
+            {
+                "factory_id": factory.get("factory_id"),
+                "start_at": ctx.now.isoformat(),
+                "end_at": end.isoformat(),
+                "mode": mode,
+                "target_temp_c": float(factory.get("target_temp_c", -18.0)),
+                "expected_grid_kwh": 1.0 if mode == "COASTING" else 3.0,
+                "expected_solar_kwh": max(0.0, solar_bonus * float(ctx.env_weights.get("w_solar", 1.0))),
+                "reason": reason,
+            }
+        )
+    return blocks
+
+
+def _run_optimization_with_fallback(ctx: JobAContext) -> list[dict[str, Any]]:
+    """optimization_service.run_optimization이 있으면 호출하고, 없으면 휴리스틱으로 대체한다."""
+    opt = optimization_service
+    if opt is not None and hasattr(opt, "run_optimization"):
+        return opt.run_optimization(  # type: ignore[no-any-return]
+            job=ctx.active_job,
+            sensor_states=ctx.factories,
+            tou_prices=ctx.tou_slots,
+            env_weights=ctx.env_weights,
+            solar_forecast=ctx.solar_forecast,
+            outdoor_temp_forecast=ctx.outdoor_temp_forecast,
+            now=ctx.now,
+        )
+    return _heuristic_blocks(ctx)
+
+
+async def _save_blocks_to_db(blocks: list[dict[str, Any]]) -> None:
+    """최적화 블록을 schedules 테이블에 저장한다. 기존 미래 슬롯은 먼저 삭제."""
+    try:
+        from backend.database.connection import AsyncSessionLocal
+        from backend.database.models import Schedule, Factory
+        from sqlalchemy import delete, select
+    except Exception:
+        from database.connection import AsyncSessionLocal
+        from database.models import Schedule, Factory
+        from sqlalchemy import delete, select
+
+    now = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as session:
+        # Supabase에 실제 존재하는 factory_id만 추출
+        result = await session.execute(select(Factory.factory_id))
+        valid_ids = {row[0] for row in result.all()}
+
+        valid_blocks = [b for b in blocks if int(b["factory_id"]) in valid_ids]
+        if not valid_blocks:
+            print(f"[Job A] 저장 가능한 공장 없음 (더미 factory_id가 DB에 없음: {[b['factory_id'] for b in blocks]})")
+            return
+
+        factory_ids = [int(b["factory_id"]) for b in valid_blocks]
+        await session.execute(
+            delete(Schedule)
+            .where(Schedule.factory_id.in_(factory_ids))
+            .where(Schedule.start_at >= now)
+        )
+        for block in valid_blocks:
+            session.add(Schedule(
+                factory_id=int(block["factory_id"]),
+                target_temp=block.get("recommended_temp_c", block.get("target_temp_c")),
+                mode=block.get("mode"),
+                start_at=datetime.fromisoformat(block["start_at"]),
+                end_at=datetime.fromisoformat(block["end_at"]),
+            ))
+        await session.commit()
+        print(f"[Job A] schedules 저장 완료: {len(valid_blocks)}개")
+
+
+def run_job_a_optimization(
+    *,
+    now: datetime | None = None,
+    data_path: Path = DEFAULT_DUMMY_DATA_PATH,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Job A: 30분 주기 최적화 1회 실행 (더미 또는 실제 데이터를 기반으로 스케줄 계산)."""
+    global _LAST_JOB_A_RESULT
+
+    data = load_dummy_data(data_path)
+    # dry_run=False(실제 실행)이면 항상 현재 시각 사용, 테스트일 때만 더미 시각 허용
+    resolved_now = _resolve_now(data, now=now) if dry_run else (now or datetime.now(timezone.utc))
+    active_job = _active_job(data)
+    if active_job is None:
+        result = {
+            "success": True,
+            "skipped": True,
+            "reason": "NO_ACTIVE_JOB",
+            "computed_at": resolved_now.isoformat(),
+            "schedule_blocks": [],
+        }
+        _LAST_JOB_A_RESULT = result
+        _JOB_A_LOGS.append(result)
+        return result
+
+    factories = _available_factories(data)
+    pricing_tou = data.get("pricing_tou", {})
+    tou_price, tou_price_source = get_tou_price_with_source(resolved_now, pricing_tou)
+    deadline = _parse_iso(active_job.get("deadline_at"))
+    env_weights = data.get("environment_weights", {})
+    solar_forecast, solar_forecast_source, solar_calibration_meta = _resolve_solar_forecast(
+        data=data,
+        now=resolved_now,
+        deadline=deadline,
+        env_weights=env_weights,
+    )
+    outdoor_temp_forecast, outdoor_temp_source = _resolve_outdoor_temp_forecast(
+        data=data,
+        now=resolved_now,
+        deadline=deadline,
+        env_weights=env_weights,
+    )
+
+    available_factory_ids = {int(factory.get("factory_id")) for factory in factories if "factory_id" in factory}
+    planned_inbound_by_factory = _planned_inbound_by_factory(
+        data,
+        active_job.get("job_id"),
+        available_factory_ids,
+    )
+    planned_shipment_by_factory = _planned_shipment_by_factory(
+        data,
+        active_job.get("job_id"),
+        available_factory_ids,
+    )
+    slot_end = resolved_now + timedelta(minutes=30)
+    door_open_count_by_factory = _door_open_count_by_factory(
+        data=data,
+        now=resolved_now,
+        horizon_end=slot_end,
+        available_factory_ids=available_factory_ids,
+    )
+    optimization_job = dict(active_job)
+    if planned_inbound_by_factory:
+        optimization_job["planned_inbound_by_factory"] = {
+            str(factory_id): units for factory_id, units in planned_inbound_by_factory.items()
+        }
+    if planned_shipment_by_factory:
+        optimization_job["planned_shipment_by_factory"] = {
+            str(factory_id): units for factory_id, units in planned_shipment_by_factory.items()
+        }
+    if door_open_count_by_factory:
+        optimization_job["door_open_count_by_factory"] = {
+            str(factory_id): count for factory_id, count in door_open_count_by_factory.items()
+        }
+
+    tou_slots_for_optimization = pricing_tou.get("slots", [])
+    if tou_price_source == "SERVICE":
+        # optimization_service가 슬롯에서 TOU를 재계산하므로 서비스 단가를 단일 슬롯으로 전달한다.
+        tou_slots_for_optimization = [
+            {
+                "start_hour": 0,
+                "end_hour": 24,
+                "price": tou_price,
+                "label": "SERVICE_TOU",
+            }
+        ]
+
+    ctx = JobAContext(
+        now=resolved_now,
+        active_job=optimization_job,
+        factories=factories,
+        tou_price=tou_price,
+        tou_slots=tou_slots_for_optimization,
+        env_weights=env_weights,
+        solar_forecast=solar_forecast,
+        outdoor_temp_forecast=outdoor_temp_forecast,
+    )
+    blocks = _run_optimization_with_fallback(ctx)
+    optimization_debug: dict[str, Any] | None = None
+    opt = optimization_service
+    if opt is not None and hasattr(opt, "get_last_optimization_debug"):
+        optimization_debug = opt.get_last_optimization_debug()  # type: ignore[assignment]
+
+    target_units = int(active_job.get("target_units", 0))
+    produced_units = int(active_job.get("produced_units", 0))
+    remaining_units = max(0, target_units - produced_units)
+    result = {
+        "success": True,
+        "skipped": False,
+        "computed_at": resolved_now.isoformat(),
+        "job_id": active_job.get("job_id"),
+        "tou_price_krw_per_kwh": tou_price,
+        "tou_price_source": tou_price_source,
+        "solar_forecast_source": solar_forecast_source,
+        "solar_calibration_alpha": (
+            float(solar_calibration_meta["alpha"])
+            if solar_calibration_meta and solar_calibration_meta.get("alpha") is not None
+            else None
+        ),
+        "solar_calibration_mode": (
+            solar_calibration_meta.get("mode") if solar_calibration_meta else None
+        ),
+        "solar_mean_residual_kwh": (
+            solar_calibration_meta.get("mean_residual_kwh")
+            if solar_calibration_meta
+            else None
+        ),
+        "solar_calibration_applied": (
+            bool(solar_calibration_meta.get("applied")) if solar_calibration_meta else False
+        ),
+        "solar_alpha_source": (
+            solar_calibration_meta.get("alpha_source") if solar_calibration_meta else None
+        ),
+        "solar_rolling_alpha": (
+            solar_calibration_meta.get("rolling_alpha") if solar_calibration_meta else None
+        ),
+        "solar_alpha_forecast": (
+            (solar_calibration_meta.get("prophet") or {}).get("alpha_forecast")
+            if solar_calibration_meta
+            else None
+        ),
+        "solar_prophet_source": (
+            (solar_calibration_meta.get("prophet") or {}).get("source")
+            if solar_calibration_meta
+            else None
+        ),
+        "solar_prophet_forecast_date": (
+            (solar_calibration_meta.get("prophet") or {}).get("forecast_date")
+            if solar_calibration_meta
+            else None
+        ),
+        "outdoor_temp_source": outdoor_temp_source,
+        "remaining_units": remaining_units,
+        "factory_count": len(factories),
+        "schedule_blocks": blocks,
+        "applied": not dry_run,
+    }
+    if optimization_debug:
+        result["optimization_debug"] = optimization_debug
+
+    if not dry_run and blocks:
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+                future = asyncio.run_coroutine_threadsafe(_save_blocks_to_db(blocks), loop)
+                future.result(timeout=30)
+            except RuntimeError:
+                asyncio.run(_save_blocks_to_db(blocks))
+            result["db_saved"] = True
+        except Exception as e:
+            result["db_saved"] = False
+            result["db_error"] = str(e)
+
+        try:
+            from backend.mqtt.publisher import publisher
+        except Exception:
+            from mqtt.publisher import publisher
+
+        node_id = os.getenv("NODE_ID", "node_A")
+        published = 0
+        for block in blocks:
+            try:
+                publisher.publish_command(
+                    node_id,
+                    int(block["factory_id"]),
+                    "SET_TARGET_TEMP",
+                    {
+                        "value": block.get("recommended_temp_c", block.get("target_temp_c")),
+                        "start_at": block.get("start_at"),
+                    },
+                )
+                published += 1
+            except Exception as e:
+                print(f"MQTT 발행 실패 factory={block.get('factory_id')}: {e}")
+        result["mqtt_published"] = published
+
+    _LAST_JOB_A_RESULT = result
+    _JOB_A_LOGS.append(result)
+    return result
+
+
+def run_job_b_update_environment_weights() -> dict[str, Any]:
+    """Job B 스텁: 환경 가중치 갱신 작업 자리(현재는 미구현)."""
+    return {"success": True, "skipped": True, "reason": "NOT_IMPLEMENTED"}
+
+
+def run_job_c_monitor_alerts() -> dict[str, Any]:
+    """Job C: 1분 주기 이상 감지 및 알림 감시 작업."""
+    if anomaly_service is None:
+        return{
+            "success": False,
+            "skipped": True,
+            "reason": "ANOMALY_SERVICE_NOT_AVAILABLE"
+        }
+    return anomaly_service.run_anomaly_monitoring()
+
+
+def get_scheduler() -> Any:
+    """BackgroundScheduler(또는 폴백 스케줄러) 인스턴스를 싱글턴으로 반환한다."""
+    global _SCHEDULER
+    if _SCHEDULER is None:
+        if BackgroundScheduler is None:
+            _SCHEDULER = _FallbackScheduler()
+        else:
+            _SCHEDULER = BackgroundScheduler(timezone="Asia/Seoul")
+    return _SCHEDULER
+
+
+def configure_scheduler_jobs() -> Any:
+    """현재 단계에서는 Job A(30분 주기)와 Job C(1분 주기 이상 감지)만 스케줄러에 등록한다."""
+    scheduler = get_scheduler()
+    scheduler.add_job(
+        run_job_a_optimization,
+        trigger="cron",
+        minute="*/30",
+        id="job_a_optimization",
+        replace_existing=True,
+        kwargs={"dry_run": False},
+    )
+
+    scheduler.add_job(
+        run_job_c_monitor_alerts,
+        trigger="cron",
+        minute="*/1",
+        id="job_c_monitor_alerts",
+        replace_existing=True,
+    )
+    return scheduler
+
+
+def get_last_job_a_result() -> dict[str, Any] | None:
+    """마지막 Job A 실행 결과를 메모리에서 반환한다."""
+    return _LAST_JOB_A_RESULT
+
+
+def get_job_a_logs(limit: int = 20) -> list[dict[str, Any]]:
+    """최근 Job A 실행 로그를 최대 limit개까지 반환한다."""
+    if limit <= 0:
+        return []
+    return _JOB_A_LOGS[-limit:]

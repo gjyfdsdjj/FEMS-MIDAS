@@ -15,3 +15,4 @@ python-jose[cryptography]
 python-dotenv
 pytest
 pytest-asyncio
+qrcode[pil]

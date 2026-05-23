@@ -123,6 +123,7 @@ $RECYCLE.BIN/
 edge/config.local.yaml
 edge/config.local.yml
 edge/*.local.*
+edge/data/*.db
 
 # =============================================================================
 # ML / 모델 (예측 서비스)

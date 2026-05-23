@@ -11,11 +11,10 @@ def temp_class(t):
 
 def temp(data):
     t = data["temp_now"]
-    # delta = round(t - data["temps"][-2], 1)
-    prev_temp = t + 0.1
-    delta = round(t - prev_temp, 1)
+    previous = data["temps"][-2] if len(data["temps"]) >= 2 else t
+    delta = round(t - previous, 1)
 
-    delta_str = f"▲ +{delta}°C 상승" if delta > 0 else f"▼ {delta}°C 하락"
+    delta_str = f"▲ +{delta}°C 상승" if delta > 0 else f"▼ {delta}°C 하강"
     delta_color = "#e05252" if delta > 0 else "#0099bb"
 
     tc = temp_class(t)

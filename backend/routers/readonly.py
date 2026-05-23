@@ -1,60 +1,54 @@
-# backend/routers/readonly.py
-# QR 모바일 읽기 전용 엔드포인트
-#
-# POST /api/v1/readonly/tokens
-#   - 권한: admin
-#   - factory_id, expires_in_minutes 받아 readonly_token 발급
-#   - readonly_tokens 테이블 저장
-#   - 응답: token, readonly_url, expires_at
-#
-# GET /api/v1/readonly/{token}
-#   - 권한: readonly_token (Bearer 불필요, 토큰 자체가 URL에 포함)
-#   - 토큰 유효성(만료, 공장 매핑) 확인
-#   - 해당 공장의 최신 온습도, 현재 스케줄 모드, 다음 스케줄 블록만 반환
-#   - 제어 관련 필드 일절 포함하지 않음
-
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from database.connection import get_db
+from services.readonly_service import (
+    get_readonly_data,
+    issue_readonly_token,
+)
+
 
 router = APIRouter(prefix="/api/v1/readonly", tags=["readonly"])
 
-# 테스트용 더미 데이터 
-readonly_dummy_data = {
-    "rdonly_test_1": {
-        "factory_id": 1,
-        "factory_name": "공장 1",
-        "status": "NORMAL",
-        "temperature_c": -21.4,
-        "humidity_pct": 41.2,
-        "current_schedule_mode": "ON",
-        "next_schedule": {
-            "start_at": "2026-03-12T21:00:00+09:00",
-            "end_at": "2026-03-12T23:00:00+09:00",
-            "mode": "ON"
-        },
-        "last_updated_at": "2026-03-12T19:29:58+09:00"
+# QR 읽기 전용 토큰 발급 요청 DTO
+class ReadonlyTokenCreateRequest(BaseModel):
+    factory_id: int
+    expires_in_minutes: int = 60
+
+# QR 읽기 전용 토큰 발급 API
+# 특정 factory_id에 연결된 readonly token을 생성하고 DB에 저장한 뒤,
+# 프론트에서 사용할 readonly_url과 만료 시간을 반환
+@router.post("/tokens")
+async def create_readonly_token(
+    request: ReadonlyTokenCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await issue_readonly_token(
+        db=db,
+        factory_id=request.factory_id,
+        expires_in_minutes=request.expires_in_minutes,
+    )
+
+    return {
+        "success": True,
+        "message": "readonly token created",
+        "data": result,
     }
-}
 
+# QR 읽기 전용 공장 조회 API
+# QR URL에 포함된 token을 기준으로 토큰 유효성을 검증하고,
+# 유효한 경우 해당 공장의 최신 센서 데이터, 스케줄 정보, 온도 이력을 반환
 @router.get("/{token}")
-def get_readonly_factory_info(token: str):
-    factory_info = readonly_dummy_data.get(token)
+async def get_readonly_factory_info(token: str, db: AsyncSession = Depends(get_db)):
+    result = await get_readonly_data(db, token)
 
-    if not factory_info:
-        return JSONResponse(
-            status_code=404,
-            content={
-                "success": False,
-                "error": {
-                    "code": "NOT_FOUND",
-                    "message": "readonly token not found",
-                    "details": {}
-                }
-            }
-        )
-    
+    if isinstance(result, JSONResponse):
+        return result
+
     return {
         "success": True,
         "message": "ok",
-        "data": factory_info
+        "data": result,
     }

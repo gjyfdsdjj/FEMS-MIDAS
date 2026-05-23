@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 class DHT22Reader:
     def __init__(self, factory_id: int, pin=board.D4):
         self.factory_id = factory_id
-        self._device = adafruit_dht.DHT22(pin)
+        self._device = adafruit_dht.DHT22(pin, use_pulseio=False)
+
 
     def read(self) -> dict | None:
         try:
