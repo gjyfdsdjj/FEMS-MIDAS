@@ -1,6 +1,4 @@
 import streamlit as st
-import random
-
 
 @st.dialog("공장 상세 정보", width="large")
 def factory_detail(
@@ -9,10 +7,12 @@ def factory_detail(
     status_bg,
     status_text,
     get_maintenance_info,
+    get_sensor_logs,
     sparkline_fig,
     temp_predict_fig,
     temp_trend_fig,
 ):
+    
     sc = status_color(f["status"])
     sb = status_bg(f["status"])
     st_txt = status_text(f["status"])
@@ -45,9 +45,20 @@ def factory_detail(
 
     dm1, dm2, dm3, dm4 = st.columns(4)
 
-    hdata = [round(f["temp"] + random.uniform(-0.8, 0.8), 1) for _ in range(19)] + [f["temp"]]
-    phdata = [round(f["hum"] + random.uniform(-2, 2), 1) for _ in range(19)] + [f["hum"]]
-    pwdata = [round(f["power"] + random.uniform(-15, 15), 0) for _ in range(19)] + [f["power"]]
+    sensor_logs = get_sensor_logs(f["factory_id"])
+
+    hdata = [log["temperature_c"] for log in sensor_logs]
+    phdata = [log["humidity_pct"] for log in sensor_logs]
+    pwdata = [log["pwm_pct"] for log in sensor_logs]
+
+    if not hdata:
+        hdata = [f["temp"]]
+
+    if not phdata:
+        phdata = [f["hum"]]
+
+    if not pwdata:
+        pwdata = [f["power"]]
 
     stock_pct = round(f["current_stock_units"] / f["capacity_units"] * 100)
 

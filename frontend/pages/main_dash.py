@@ -73,6 +73,16 @@ def hex_to_rgba(hex_color, alpha=0.08):
     r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
     return f"rgba({r},{g},{b},{alpha})"
 
+def control_log_text(log):
+    action_map = {
+        "STOP": "비상 정지",
+        "SET_PWM": f"PWM {log.get('value')}% 설정",
+        "RECOVER": "정지 복구",
+    }
+
+    action = action_map.get(log["action"], log["action"])
+    return f"{log['issued_at'][11:16]}  공장 {log['factory_id']} {action}"
+
 def log_action(action):
     ts = datetime.now().strftime("%H:%M")
     st.session_state.ctrl_log.insert(0, f"{ts}  {action}")
@@ -96,6 +106,12 @@ def get_maintenance_info(factory_id):
 def get_temp_predictions(factory_id):
     return [p for p in dummy_data.get("predict_temperature", [])
             if p["factory_id"] == factory_id]
+
+def get_sensor_logs(factory_id):
+    return [
+        log for log in dummy_data.get("sensor_logs", [])
+        if log["factory_id"] == factory_id
+    ]
 
 def make_equip(factory):
     return [
@@ -135,20 +151,15 @@ FACTORIES = [
     for f in dummy_data["factories"]
 ]
 
-SCHEDULE = {
-    "냉동1": ["on","on","on","on","on","on","on","off","off","peak","peak","peak","peak","off","off","off","on","on","peak","peak","off","on","on","on"],
-    "냉동2": ["off","off","off","off","on","on","on","on","off","off","peak","peak","on","on","off","on","on","on","peak","off","off","off","off","off"],
-    "냉동3": ["on","on","off","off","off","on","on","on","on","on","peak","peak","off","off","on","on","on","peak","peak","off","off","on","on","on"],
-    "태양광": ["off","off","off","off","off","off","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","solar","off","off","off","off","off","off"],
-    "요금대": ["off","off","off","off","off","off","off","off","off","peak","peak","peak","peak","peak","off","off","off","off","peak","peak","off","off","off","off"],
-}
-
 
 # 세션 초기화
 
 def init_state():
     defaults = {
-        "ctrl_log": ["14:22  시스템 자동 가동 시작", "13:45  냉동2 온도 경보 해제"],
+        "ctrl_log": [
+            control_log_text(log)
+            for log in dummy_data.get("control_logs", [])
+        ],
         "emergency": False,
         "factories": [dict(f) for f in FACTORIES],
         "power_kw": 847.0,
@@ -228,16 +239,60 @@ def temp_predict_fig(factory_id, current_temp):
         yaxis=dict(tickfont=dict(size=10,color="#888780"), gridcolor="#f1efe8", ticksuffix="°C"))
     return fig
 
-def schedule_fig():
+def schedule_fig(dummy_data):
     now_h = datetime.now().hour
-    rows  = list(SCHEDULE.keys())
-    z = [[{"on":1,"peak":2,"solar":3,"off":0}[p] for p in SCHEDULE[row]] for row in rows]
+
+    rows = ["공장 1", "공장 2", "공장 3", "공장 4", "요금대"]
+    z = [[0 for _ in range(24)] for _ in rows]
+
+    schedules = dummy_data.get("schedules", [])
+    blocks = schedules[0].get("blocks", []) if schedules else []
+
+    mode_map = {
+        "ON": 1,
+        "PRECOOL": 1,
+        "COASTING": 2,
+        "SOLAR_PRIORITY": 3,
+        "OFF": 0,
+    }
+
+    for block in blocks:
+        fid = block["factory_id"]
+        row_idx = fid - 1
+
+        start_h = int(block["start_at"][11:13])
+        end_h = int(block["end_at"][11:13])
+        mode = block["mode"]
+
+        for h in range(start_h, end_h):
+            if 0 <= h < 24:
+                z[row_idx][h] = mode_map.get(mode, 0)
+
+    pricing = dummy_data.get("pricing_tou", {}).get("slots", [])
+    fee_row_idx = 4
+
+    for slot in pricing:
+        sh = slot["start_hour"]
+        eh = slot["end_hour"]
+        price = slot["price"]
+
+        value = 2 if price >= 180 else 0
+
+        if sh < eh:
+            hours = range(sh, eh)
+        else:
+            hours = list(range(sh, 24)) + list(range(0, eh))
+
+        for h in hours:
+            z[fee_row_idx][h] = value
+
     colorscale = [
-        [0.00,"#f1efe8"],[0.25,"#f1efe8"],
-        [0.25,"#378add"],[0.50,"#378add"],
-        [0.50,"#e24b4a"],[0.75,"#e24b4a"],
-        [0.75,"#639922"],[1.00,"#639922"],
-    ]
+        [0.00, "#f1efe8"], [0.25, "#f1efe8"],
+        [0.25, "#378add"], [0.50, "#378add"],
+        [0.50, "#e24b4a"], [0.75, "#e24b4a"],
+        [0.75, "#639922"], [1.00, "#639922"],
+    ]        
+
     fig = go.Figure(go.Heatmap(z=z, x=[f"{h}h" for h in range(24)], y=rows,
         colorscale=colorscale, zmin=0, zmax=3, showscale=False, xgap=1, ygap=2))
     fig.add_vline(x=now_h-0.5, line_width=2, line_color="#1a1a2e", opacity=0.6)
@@ -410,6 +465,7 @@ with main_col:
                 status_bg,
                 status_text,
                 get_maintenance_info,
+                get_sensor_logs,
                 sparkline_fig,
                 temp_predict_fig,
                 temp_trend_fig,

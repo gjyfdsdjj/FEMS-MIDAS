@@ -338,13 +338,16 @@
   background: #f5f6f8;
   border-radius: 7px;
   padding: 8px 10px;
-  font-size: 11px;
-  max-height: 80px;
+  font-size: 15px;
+  font-weight: 450;
+  max-height: 200px;
   overflow-y: auto;
 }
 .log-time {
-  color: #b4b2a9;
-  margin-right: 6px;
+  color: #515151;
+  margin-right: 13px;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 .emg-banner {

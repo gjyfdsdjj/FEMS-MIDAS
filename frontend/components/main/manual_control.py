@@ -32,7 +32,7 @@ def manual_control(log_action):
 
     st.markdown("""
     <div style="background:#faeeda;border:0.5px solid #fac775;border-radius:6px;
-        padding:7px 10px;font-size:11px;color:#854f0b;margin-bottom:10px">
+        padding:7px 10px;font-size:14px;color:#854f0b;margin-bottom:10px">
       수동 제어 시 자동 스케줄이 일시 중지됩니다.
     </div>
     """, unsafe_allow_html=True)
@@ -94,14 +94,14 @@ def manual_control(log_action):
         st.markdown('<div class="emg-banner">비상 정지 활성화</div>', unsafe_allow_html=True)
 
     st.markdown(
-        '<div style="margin-top:10px;font-size:11px;font-weight:500;color:#888780;margin-bottom:4px">제어 내역</div>',
+        '<div style="margin-top:10px;font-size:17px;font-weight:500;color:#1a1a2e;margin-bottom:4px">제어 내역</div>',
         unsafe_allow_html=True
     )
 
     log_html = "".join(
         f'<div><span class="log-time">{line.split("  ")[0]}</span>'
         f'{("  ".join(line.split("  ")[1:]) if "  " in line else line)}</div>'
-        for line in st.session_state.ctrl_log[:8]
+        for line in st.session_state.ctrl_log
     )
 
     st.markdown(f'<div class="log-box">{log_html}</div>', unsafe_allow_html=True)

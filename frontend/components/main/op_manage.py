@@ -19,7 +19,7 @@ def operation_manage(dummy_data, schedule_fig):
             unsafe_allow_html=True
         )
         st.plotly_chart(
-            schedule_fig(),
+            schedule_fig(dummy_data),
             width="stretch",
             config={"displayModeBar": False}
         )
