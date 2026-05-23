@@ -228,27 +228,85 @@
 }
 .metric-box {
   background: #f5f6f8;
-  border-radius: 8px;
+  border-radius: 8px 8px 0 0;
   padding: 12px 14px;
+  margin-bottom: 5px !important;
 }
+
+.st-key-detail_metric_chart_0,
+.st-key-detail_metric_chart_1,
+.st-key-detail_metric_chart_2 {
+  background: #f5f6f8;
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+  margin-top: -10px;
+}
+
+.st-key-detail_metric_chart_0 [data-testid="stPlotlyChart"],
+.st-key-detail_metric_chart_1 [data-testid="stPlotlyChart"],
+.st-key-detail_metric_chart_2 [data-testid="stPlotlyChart"],
+.st-key-detail_metric_chart_0,
+.st-key-detail_metric_chart_1,
+.st-key-detail_metric_chart_2 {
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+}
+
+/* 공장 상세 정보 */
+/* 제목 */
 .metric-box-label {
-  font-size: 15px;
-  color: #888780;
+  font-size: 16px;
+  color: #4f4f4f;
   margin-bottom: 4px;
+  font-weight: 400;
 }
+
+/* 숫자 */
 .metric-box-val {
   font-size: 20px;
   font-weight: 500;
   color: #1a1a2e;
   line-height: 1;
 }
+
+/* 단위 */
 .metric-box-unit {
-  font-size: 12px;
-  color: #888780;
+  font-size: 13px;
+  color: #686868;
 }
+
+/* 보조 글씨*/
 .metric-box-trend {
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 4px;
+}
+
+/* 재고 현황 */
+.stock-box {
+  background: #f5f6f8 !important;
+  border-radius: 8px !important;
+  padding: 12px 14px !important;
+  min-height: 118px;
+  overflow: hidden;
+}
+
+.st-key-fcbtn_0 button,
+.st-key-fcbtn_1 button,
+.st-key-fcbtn_2 button,
+.st-key-fcbtn_3 button,
+.st-key-stopbtn_0 button,
+.st-key-stopbtn_1 button,
+.st-key-stopbtn_2 button,
+.st-key-stopbtn_3 button,
+.st-key-recoverbtn_0 button,
+.st-key-recoverbtn_1 button,
+.st-key-recoverbtn_2 button,
+.st-key-recoverbtn_3 button {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  font-size: 13px !important;
+  padding: 6px 8px !important;
+  min-height: 38px !important;
 }
 
 .equip-item {

@@ -113,6 +113,12 @@ def get_sensor_logs(factory_id):
         if log["factory_id"] == factory_id
     ]
 
+def get_door_events(factory_id):
+    return [
+        event for event in dummy_data.get("door_open_events", [])
+        if event["factory_id"] == factory_id
+    ]
+
 def make_equip(factory):
     return [
         {"n": "통신 상태", "v": factory["communication_status"],
@@ -187,14 +193,14 @@ if now_t - st.session_state.last_tick > 3:
 # 차트 함수
 
 def sparkline_fig(data, color, height=50):
-    fill_color = hex_to_rgba(color, 0.08)
+    y_min = min(data) - 0.2
+    y_max = max(data) + 0.2
     fig = go.Figure()
     fig.add_trace(go.Scatter(y=data, mode="lines",
-        line=dict(color=color, width=1.8, shape="spline"),
-        fill="tozeroy", fillcolor=fill_color))
+        line=dict(color=color, width=1.8, shape="spline")))
     fig.update_layout(margin=dict(l=0,r=0,t=0,b=0), height=height,
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(visible=False), yaxis=dict(visible=False), showlegend=False)
+        paper_bgcolor="rgba(0,0,0,0)",  plot_bgcolor=hex_to_rgba(color, 0.08),
+        xaxis=dict(visible=False), yaxis=dict(visible=False, range=[y_min, y_max]), showlegend=False)
     return fig
 
 def temp_trend_fig(f, n=20):
@@ -448,7 +454,7 @@ with side_col:
 with main_col:
     st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["공장 현황", "에너지·비용", "운영 관리", "수동 제어"])
+    tab1, tab2, tab3, tab4 = st.tabs(["공장 현황", "에너지 · 비용", "운영 관리", "수동 제어"])
 
     # 공장 현황
     with tab1:
@@ -466,6 +472,7 @@ with main_col:
                 status_text,
                 get_maintenance_info,
                 get_sensor_logs,
+                get_door_events,
                 sparkline_fig,
                 temp_predict_fig,
                 temp_trend_fig,
