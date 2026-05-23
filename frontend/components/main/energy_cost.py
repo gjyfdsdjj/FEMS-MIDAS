@@ -145,13 +145,13 @@ def tou_status_html(dummy_data):
         border = f"1.5px solid {color}" if active else "1px solid #e0e3ea"
 
         current_badge = (
-            f'<div style="font-size:9px;color:{color};font-weight:500;margin-top:2px">▶ 현재</div>'
+            f'<div style="font-size:10px;color:{color};font-weight:500;margin-top:2px">▶ 현재</div>'
             if active else ""
         )
 
         items.append(
             f'<div style="flex:1;padding:6px 8px;border-radius:6px;background:{bg};border:{border}">'
-            f'<div style="font-size:9px;color:#888780">{sh:02d}~{eh:02d}시</div>'
+            f'<div style="font-size:10px;color:#888780">{sh:02d}~{eh:02d}시</div>'
             f'<div style="font-size:13px;font-weight:600;color:{color}">₩{price}</div>'
             f'{current_badge}'
             f'</div>'
@@ -160,7 +160,7 @@ def tou_status_html(dummy_data):
     return (
         f'<div style="background:#fff;border:0.5px solid #e0e3ea;border-radius:8px;padding:10px">'
         f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-        f'<span style="font-size:11px;color:#888780;font-weight:500">TOU 요금 현황</span>'
+        f'<span></span>'
         f'<span style="font-size:16px;font-weight:600;color:#e24b4a">₩{current}'
         f'<span style="font-size:10px;font-weight:400;color:#888780"> /kWh</span></span>'
         f'</div>'
@@ -230,5 +230,5 @@ def energy_cost(dummy_data):
         """, unsafe_allow_html=True)
 
     with bottom_right:
-        st.markdown("<div style='height:42px'></div>", unsafe_allow_html=True)
+        st.markdown('<div class="card-title">TOU 요금 현황</div>', unsafe_allow_html=True)
         st.markdown(tou_status_html(dummy_data), unsafe_allow_html=True)

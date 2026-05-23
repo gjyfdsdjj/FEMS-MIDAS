@@ -36,17 +36,12 @@ def factory_status(
             sb = status_bg(f["status"])
             st_txt = status_text(f["status"])
 
-            maint = get_maintenance_info(f["factory_id"])
-            ms = maint["health_score"] if maint else 1.0
-            mc = "#1d9e75" if ms >= 0.6 else ("#ba7517" if ms >= 0.4 else "#e24b4a")
-
             with st.container(key=f"factory_card_{i}"):
                 st.markdown(
                     f'<div class="factory-card-inner">'
                     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">'
                     f'<div>'
                     f'<div class="fc-name">{f["name"]}</div>'
-                    f'<span style="font-size:9px;color:{mc};background:{status_bg("ok" if ms >= 0.6 else "warn")};padding:1px 6px;border-radius:8px">♥ {ms:.2f}</span>'
                     f'</div>'
                     f'<span class="badge" style="background:{sb};color:{sc}">{st_txt}</span>'
                     f'</div>'

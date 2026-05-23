@@ -1,4 +1,6 @@
 import streamlit as st
+import plotly.graph_objects as go
+import random
 
 
 @st.dialog("공장 상세 정보", width="large")
@@ -105,7 +107,7 @@ def factory_detail(
                 st.plotly_chart(pred_fig, width="stretch", config={"displayModeBar": False})
             else:
                 st.markdown(
-                    '<div style="font-size:12px;color:#b4b2a9;padding:4px 0 10px">온도 예측 데이터 없음</div>',
+                    '<div style="font-size:12px;color:#6e6e6e;padding:4px 0 10px">온도 예측 데이터 없음</div>',
                     unsafe_allow_html=True
                 )
 
@@ -188,7 +190,7 @@ def factory_detail(
 
             if not f["alarms"]:
                 st.markdown(
-                    '<div style="font-size:12px;color:#b4b2a9;padding:4px 0 10px">활성 경보 없음</div>',
+                    '<div style="font-size:12px;color:#6e6e6e;padding:4px 0 10px">활성 경보 없음</div>',
                     unsafe_allow_html=True
                 )
             else:

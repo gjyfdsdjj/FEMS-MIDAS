@@ -4,6 +4,7 @@ import json5
 import plotly.graph_objects as go
 import time
 import sys
+import base64
 from pathlib import Path
 from datetime import datetime
 
@@ -15,7 +16,17 @@ from components.main.factory_status import factory_status
 from components.main.energy_cost import energy_cost
 from components.main.op_manage import operation_manage
 from components.main.manual_control import manual_control
-
+from components.main.data_helpers import (
+    convert_status,
+    control_log_text,
+    get_factory_alarms,
+    get_all_unacked_alerts,
+    get_maintenance_info,
+    get_temp_predictions,
+    get_sensor_logs,
+    get_door_events,
+    make_equip,
+)
 
 st.set_page_config(
     page_title="MIDAS FEMS 대시보드",
@@ -40,12 +51,6 @@ def load_dummy_data():
 
 dummy_data = load_dummy_data()
 
-
-def convert_status(status):
-    if status in ("NORMAL", "SAVING"):      return "ok"
-    if status in ("WARNING", "MANUAL_STOP", "STOPPED"): return "warn"
-    if status == "EMERGENCY":               return "err"
-    return "ok"
 
 def status_color(s):
     return {"ok": "#3b6d11", "warn": "#854f0b", "err": "#a32d2d"}.get(s, "#888780")
@@ -73,65 +78,9 @@ def hex_to_rgba(hex_color, alpha=0.08):
     r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
     return f"rgba({r},{g},{b},{alpha})"
 
-def control_log_text(log):
-    action_map = {
-        "STOP": "비상 정지",
-        "SET_PWM": f"PWM {log.get('value')}% 설정",
-        "RECOVER": "정지 복구",
-    }
-
-    action = action_map.get(log["action"], log["action"])
-    return f"{log['issued_at'][11:16]}  공장 {log['factory_id']} {action}"
-
 def log_action(action):
     ts = datetime.now().strftime("%H:%M")
     st.session_state.ctrl_log.insert(0, f"{ts}  {action}")
-
-def get_factory_alarms(factory_id):
-    return [
-        {"msg": a["message"], "time": a["created_at"][11:16],
-         "level": a["level"], "acknowledged": a["is_acknowledged"],
-         "alert_id": a["alert_id"]}
-        for a in dummy_data.get("alerts", [])
-        if a["factory_id"] == factory_id
-    ]
-
-def get_all_unacked_alerts():
-    return [a for a in dummy_data.get("alerts", []) if not a["is_acknowledged"]]
-
-def get_maintenance_info(factory_id):
-    return next((m for m in dummy_data.get("predict_maintenance", [])
-                 if m["factory_id"] == factory_id), None)
-
-def get_temp_predictions(factory_id):
-    return [p for p in dummy_data.get("predict_temperature", [])
-            if p["factory_id"] == factory_id]
-
-def get_sensor_logs(factory_id):
-    return [
-        log for log in dummy_data.get("sensor_logs", [])
-        if log["factory_id"] == factory_id
-    ]
-
-def get_door_events(factory_id):
-    return [
-        event for event in dummy_data.get("door_open_events", [])
-        if event["factory_id"] == factory_id
-    ]
-
-def make_equip(factory):
-    return [
-        {"n": "통신 상태", "v": factory["communication_status"],
-         "s": "ok" if factory["communication_status"] == "OK" else "warn"},
-        {"n": "제어 모드", "v": factory["control_mode"],
-         "s": "ok" if factory["control_mode"] == "AUTO" else "warn"},
-        {"n": "스케줄",   "v": factory["current_schedule_mode"],
-         "s": "warn" if factory["current_schedule_mode"] in ("OFF","COASTING") else "ok"},
-        {"n": "PWM",      "v": f"{factory['pwm_pct']}%",
-         "s": "err" if factory["pwm_pct"]==0 and factory["manual_stop"] else "ok"},
-        {"n": "재고",     "v": f"{factory['current_stock_units']}/{factory['capacity_units']}", "s": "ok"},
-        {"n": "노드",     "v": factory["node_id"], "s": "ok"},
-    ]
 
 
 # 데이터
@@ -149,7 +98,7 @@ FACTORIES = [
         "max_temp": f["target_temp_c"] + 2,
         "min_temp": f["target_temp_c"] - 8,
         "equip": make_equip(f),
-        "alarms": get_factory_alarms(f["factory_id"]),
+        "alarms": get_factory_alarms(dummy_data, f["factory_id"]),
         "manual_stop": f["manual_stop"],
         "current_stock_units": f["current_stock_units"],
         "capacity_units": f["capacity_units"],
@@ -159,7 +108,6 @@ FACTORIES = [
 
 
 # 세션 초기화
-
 def init_state():
     defaults = {
         "ctrl_log": [
@@ -180,7 +128,6 @@ init_state()
 
 
 # 실시간 시뮬레이션
-
 now_t = time.time()
 if now_t - st.session_state.last_tick > 3:
     st.session_state.power_kw = max(700, min(1050, st.session_state.power_kw + random.uniform(-8, 8)))
@@ -191,7 +138,6 @@ if now_t - st.session_state.last_tick > 3:
 
 
 # 차트 함수
-
 def sparkline_fig(data, color, height=50):
     y_min = min(data) - 0.2
     y_max = max(data) + 0.2
@@ -222,7 +168,7 @@ def temp_trend_fig(f, n=20):
     return fig
 
 def temp_predict_fig(factory_id, current_temp):
-    preds = get_temp_predictions(factory_id)
+    preds = get_temp_predictions(dummy_data, factory_id)
     if not preds: return None
     times     = [p["timestamp"][11:16] for p in preds]
     predicted = [p["predicted_temperature_c"] for p in preds]
@@ -311,7 +257,6 @@ def schedule_fig(dummy_data):
 
 
 # HTML 컴포넌트 함수
-
 def kpi_card(label, value, unit, sub, pct, accent, delta_text="", delta_kind="ok"):
     bar = f'<div class="kpi-bar-wrap"><div class="kpi-bar-fill" style="width:{pct:.1f}%;background:{accent}"></div></div>'
     delta = f'<div class="delta-{delta_kind}">{delta_text}</div>' if delta_text else ""
@@ -335,7 +280,7 @@ def env_weights_html():
         f'<span style="font-size:14px;font-weight:500;color:#515151">{k}</span>'
         f'<span style="font-size:14px;color:#444441">{v}</span></div>'
         for k,v in items)
-    return f'<div style="background:#fff;border:0.5px solid #e0e3ea;border-radius:8px;padding:10px"><div style="font-size:17px;font-weight:500;margin-bottom:7px">환경 정보</div>{rows}</div>'
+    return f'<div style="background:#fff;border:0.5px solid #e0e3ea;border-radius:8px;padding:10px">{rows}</div>'
 
 def maintenance_html():
     items = dummy_data.get("predict_maintenance",[])
@@ -368,7 +313,7 @@ risk_color = "#e24b4a" if risk>80 else ("#ba7517" if risk>40 else "#1d9e75")
 daily_wan   = round(dash.get("estimated_daily_saving_krw",0)/10000)
 monthly_wan = round(dash.get("estimated_monthly_saving_krw",0)/10000)
 carbon      = dash.get("carbon_reduction_tco2_year",0)
-unacked     = get_all_unacked_alerts()
+unacked     = get_all_unacked_alerts(dummy_data)
 
 warn_count = sum(1 for f in st.session_state.factories if f["status"] in ("warn","err"))
 
@@ -442,11 +387,13 @@ with side_col:
     # 설비 상태 분석
     st.markdown('<div class="card-title">설비 상태 분석</div>', unsafe_allow_html=True)
     st.markdown(maintenance_html(), unsafe_allow_html=True)
-
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-    st.divider()
+    st.markdown(
+        "<hr style='margin:15px 0 8px 0; border:none; border-top:1px solid #e0e3ea;'>",
+        unsafe_allow_html=True
+    )
 
     # 환경 정보
+    st.markdown('<div class="card-title">환경 정보</div>', unsafe_allow_html=True)
     st.markdown(env_weights_html(), unsafe_allow_html=True)
 
 
@@ -459,7 +406,7 @@ with main_col:
     # 공장 현황
     with tab1:
         factory_status(
-            get_maintenance_info,
+            lambda factory_id: get_maintenance_info(dummy_data, factory_id),
             temp_pct,
             bar_color,
             status_color,
@@ -470,9 +417,9 @@ with main_col:
                 status_color,
                 status_bg,
                 status_text,
-                get_maintenance_info,
-                get_sensor_logs,
-                get_door_events,
+                lambda factory_id: get_maintenance_info(dummy_data, factory_id),
+                lambda factory_id: get_sensor_logs(dummy_data, factory_id),
+                lambda factory_id: get_door_events(dummy_data, factory_id),
                 sparkline_fig,
                 temp_predict_fig,
                 temp_trend_fig,
@@ -493,3 +440,12 @@ with main_col:
         manual_control(log_action)
         
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+# 챗봇
+mic_path = Path(__file__).resolve().parents[1] / "assets" / "mic.png"
+
+st.markdown(f"""
+<a class="floating-chat-btn" href="#">
+    <img src="data:image/png;base64,{base64.b64encode(mic_path.read_bytes()).decode()}" />
+</a>
+""", unsafe_allow_html=True)

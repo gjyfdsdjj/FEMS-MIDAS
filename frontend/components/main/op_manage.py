@@ -26,16 +26,16 @@ def operation_manage(dummy_data, schedule_fig):
 
         st.markdown("""
         <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:-8px">
-          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#888780">
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888780">
             <span style="width:12px;height:8px;background:#378add;border-radius:2px;display:inline-block"></span>가동
           </div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#888780">
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888780">
             <span style="width:12px;height:8px;background:#e24b4a;border-radius:2px;display:inline-block"></span>피크요금
           </div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#888780">
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888780">
             <span style="width:12px;height:8px;background:#639922;border-radius:2px;display:inline-block"></span>태양광
           </div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#888780">
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888780">
             <span style="width:12px;height:8px;background:#f1efe8;border:0.5px solid #e0e3ea;border-radius:2px;display:inline-block"></span>대기
           </div>
         </div>
@@ -52,17 +52,17 @@ def operation_manage(dummy_data, schedule_fig):
             st.markdown(f"""
             <div style="margin-top:12px;padding:10px 14px;
                 background:#eaf3de;border-radius:8px;border:0.5px solid #c6dba0">
-              <div style="font-size:11px;font-weight:500;color:#3b6d11;margin-bottom:6px">
+              <div style="font-size:12px;font-weight:500;color:#3b6d11;margin-bottom:6px">
                 최적화 스케줄 적용 중
               </div>
               <div style="display:flex;gap:16px;flex-wrap:wrap">
-                <span style="font-size:11px;color:#444441">
+                <span style="font-size:12px;color:#444441">
                   일 절감 예상 <b style="color:#3b6d11">₩{est_d}만</b>
                 </span>
-                <span style="font-size:11px;color:#444441">
+                <span style="font-size:12px;color:#444441">
                   월 절감 예상 <b style="color:#3b6d11">₩{est_m}만</b>
                 </span>
-                <span style="font-size:11px;color:#888780">계산: {comp}</span>
+                <span style="font-size:12px;color:#888780">계산: {comp}</span>
               </div>
             </div>
             """, unsafe_allow_html=True)
@@ -103,10 +103,10 @@ def job_status_html(dummy_data):
 
         alloc_rows.append(
             f'<tr style="background:{row_bg}">'
-            f'<td style="padding:4px 8px;font-size:11px;color:#444441">공장 {fid}</td>'
-            f'<td style="padding:4px 8px;font-size:11px;color:#378add;text-align:right">{inbound}개</td>'
-            f'<td style="padding:4px 8px;font-size:11px;color:#ba7517;text-align:right">{shipment}개</td>'
-            f'<td style="padding:4px 8px;font-size:10px;color:#b4b2a9">{"정지 제외" if excluded else ""}</td>'
+            f'<td style="padding:4px 8px;font-size:12px;color:#444441">공장 {fid}</td>'
+            f'<td style="padding:4px 8px;font-size:12px;color:#378add;text-align:right">{inbound}개</td>'
+            f'<td style="padding:4px 8px;font-size:12px;color:#ba7517;text-align:right">{shipment}개</td>'
+            f'<td style="padding:4px 8px;font-size:11px;color:#b4b2a9">{"정지 제외" if excluded else ""}</td>'
             f'</tr>'
         )
 
@@ -114,8 +114,8 @@ def job_status_html(dummy_data):
     <div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
         <div>
-          <div style="font-size:12px;font-weight:500;color:#1a1a2e">{job['job_id']}</div>
-          <div style="font-size:11px;color:#888780;margin-top:2px">
+          <div style="font-size:13px;font-weight:500;color:#1a1a2e">{job['job_id']}</div>
+          <div style="font-size:12px;color:#888780;margin-top:2px">
             마감 {deadline} · 전략: {strat}
           </div>
         </div>
@@ -124,29 +124,29 @@ def job_status_html(dummy_data):
             {job['produced_units']}
             <span style="font-size:12px;font-weight:400;color:#888780">/{job['target_units']}개</span>
           </div>
-          <div style="font-size:10px;color:#888780">잔여 {job['remaining_units']}개</div>
+          <div style="font-size:12px;color:#888780">잔여 {job['remaining_units']}개</div>
         </div>
       </div>
 
-      <div style="height:10px;background:#f1efe8;border-radius:5px;overflow:hidden;margin-bottom:4px">
+      <div style="height:11px;background:#f1efe8;border-radius:5px;overflow:hidden;margin-bottom:4px">
         <div style="height:10px;width:{pct:.1f}%;background:{bar_clr};border-radius:5px;transition:width .3s"></div>
       </div>
 
-      <div style="font-size:10px;color:{bar_clr};text-align:right;margin-bottom:14px">
+      <div style="font-size:11px;color:{bar_clr};text-align:right;margin-bottom:14px">
         {pct:.0f}% 완료
       </div>
 
-      <div style="font-size:11px;font-weight:500;color:#888780;margin-bottom:6px">
+      <div style="font-size:13px;font-weight:500;color:#888780;margin-bottom:6px">
         공장별 입고 / 출고 분배
       </div>
 
       <table style="width:100%;border-collapse:collapse;border:0.5px solid #e0e3ea;border-radius:6px;overflow:hidden">
         <thead style="background:#f8f8f6">
           <tr>
-            <th style="font-size:10px;color:#888780;font-weight:500;text-align:left;padding:5px 8px">공장</th>
-            <th style="font-size:10px;color:#378add;font-weight:500;text-align:right;padding:5px 8px">입고 예정</th>
-            <th style="font-size:10px;color:#ba7517;font-weight:500;text-align:right;padding:5px 8px">출고 예정</th>
-            <th style="font-size:10px;color:#888780;font-weight:500;padding:5px 8px">비고</th>
+            <th style="font-size:12px;color:#888780;font-weight:500;text-align:left;padding:5px 8px">공장</th>
+            <th style="font-size:12px;color:#378add;font-weight:500;text-align:right;padding:5px 8px">입고 예정</th>
+            <th style="font-size:12px;color:#ba7517;font-weight:500;text-align:right;padding:5px 8px">출고 예정</th>
+            <th style="font-size:12px;color:#888780;font-weight:500;padding:5px 8px">비고</th>
           </tr>
         </thead>
         <tbody>

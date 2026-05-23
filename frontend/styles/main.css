@@ -10,16 +10,8 @@
   padding-top: 3rem !important;
 }
 
-.dash-header {
-  background: #fff;
-  border: 0.5px solid #e0e3ea;
-  border-radius: 10px;
-  padding: 10px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
+/* 상단 */
+/* 공장명 */
 .dash-logo {
   font-size: 23px;
   font-weight: 600;
@@ -48,7 +40,6 @@
     opacity: 0.3;
   }
 }
-
 .badge {
   display: inline-block;
   padding: 2px 10px;
@@ -69,6 +60,7 @@
   color: #a32d2d;
 }
 
+/* kpi */
 .kpi-card {
   background: #fff;
   border: 0.5px solid #e0e3ea;
@@ -121,6 +113,83 @@
   margin-top: 4px;
 }
 
+/* 공장 현황 */
+[class*="st-key-factory_card_"] {
+  background-color: #ffffff !important;
+  border: 1.5px solid #e0e3ea !important;
+  border-radius: 10px !important;
+  padding: 14px !important;
+}
+[class*="st-key-factory_card_"] .factory-card-inner {
+  background-color: #ffffff !important;
+}
+/* 온습도*/
+[class*="st-key-factory_card_"] .fc-metric-box {
+  background-color: #f5f6f8 !important;
+  border-radius: 6px !important;
+  padding: 8px 10px !important;
+}
+/* 목표 온도 */
+.fc-target-text {
+  font-size: 12px;
+  color: #888780;
+  margin-left: 13px;
+}
+/* 상세보기, 비상 정지*/
+[class*="st-key-factory_card_"] .stButton {
+  margin-top: 4px;
+}
+.fc-metric-label {
+  font-size: 15px;
+  color: #888780;
+}
+.fc-metric-val {
+  font-size: 18px;
+  font-weight: 500;
+  color: #1a1a2e;
+  line-height: 1.2;
+}
+.fc-metric-unit {
+  font-size: 15px;
+  color: #888780;
+}
+.fc-bar-wrap {
+  height: 4px;
+  background: #e0e3ea;
+  border-radius: 2px;
+  margin-top: 17px;
+}
+/* PWM */
+.fc-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #888780;
+}
+.fc-footer b {
+  color: #1a1a2e;
+}
+/* 상세보기, 비상정지, 정지복구 버튼 */
+.st-key-fcbtn_0 button,
+.st-key-fcbtn_1 button,
+.st-key-fcbtn_2 button,
+.st-key-fcbtn_3 button,
+.st-key-stopbtn_0 button,
+.st-key-stopbtn_1 button,
+.st-key-stopbtn_2 button,
+.st-key-stopbtn_3 button,
+.st-key-recoverbtn_0 button,
+.st-key-recoverbtn_1 button,
+.st-key-recoverbtn_2 button,
+.st-key-recoverbtn_3 button {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  font-size: 13px !important;
+  padding: 6px 8px !important;
+  min-height: 38px !important;
+}
+
 .factory-card {
   background: #fff;
   border: 1.5px solid #e0e3ea;
@@ -160,47 +229,6 @@
   color: #1a1a2e;
   margin-bottom: 5px;
 }
-.fc-id {
-  font-size: 15px;
-  color: #888780;
-  margin-top: 2px;
-  margin-bottom: 10px;
-}
-.fc-metric-box {
-  background: #f5f6f8;
-  border-radius: 6px;
-  padding: 8px 10px;
-}
-.fc-metric-label {
-  font-size: 15px;
-  color: #888780;
-}
-.fc-metric-val {
-  font-size: 18px;
-  font-weight: 500;
-  color: #1a1a2e;
-  line-height: 1.2;
-}
-.fc-metric-unit {
-  font-size: 15px;
-  color: #888780;
-}
-.fc-bar-wrap {
-  height: 4px;
-  background: #e0e3ea;
-  border-radius: 2px;
-  margin-top: 17px;
-}
-.fc-footer {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 8px;
-  font-size: 13px;
-  color: #888780;
-}
-.fc-footer b {
-  color: #1a1a2e;
-}
 
 .detail-card {
   background: #fff;
@@ -218,21 +246,47 @@
   font-size: 15px;
   gap: 10px;
 }
-.section-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: #888780;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 8px;
-}
+
+/* 공장 상세 정보 */
+/* 박스 제목 */
 .metric-box {
   background: #f5f6f8;
   border-radius: 8px 8px 0 0;
   padding: 12px 14px;
   margin-bottom: 5px !important;
 }
-
+.metric-box-label {
+  font-size: 16px;
+  color: #4f4f4f;
+  margin-bottom: 4px;
+  font-weight: 400;
+}
+/* 숫자 */
+.metric-box-val {
+  font-size: 20px;
+  font-weight: 500;
+  color: #1a1a2e;
+  line-height: 1;
+}
+/* 단위 */
+.metric-box-unit {
+  font-size: 13px;
+  color: #686868;
+}
+/* 보조 글씨*/
+.metric-box-trend {
+  font-size: 13px;
+  margin-top: 4px;
+}
+/* 재고 현황 */
+.stock-box {
+  background: #f5f6f8 !important;
+  border-radius: 8px !important;
+  padding: 12px 14px !important;
+  min-height: 118px;
+  overflow: hidden;
+}
+/* 온도, 습도, PWM */
 .st-key-detail_metric_chart_0,
 .st-key-detail_metric_chart_1,
 .st-key-detail_metric_chart_2 {
@@ -241,7 +295,6 @@
   overflow: hidden;
   margin-top: -10px;
 }
-
 .st-key-detail_metric_chart_0 [data-testid="stPlotlyChart"],
 .st-key-detail_metric_chart_1 [data-testid="stPlotlyChart"],
 .st-key-detail_metric_chart_2 [data-testid="stPlotlyChart"],
@@ -251,64 +304,34 @@
   border-radius: 0 0 8px 8px;
   overflow: hidden;
 }
-
-/* 공장 상세 정보 */
-/* 제목 */
-.metric-box-label {
-  font-size: 16px;
-  color: #4f4f4f;
-  margin-bottom: 4px;
-  font-weight: 400;
-}
-
-/* 숫자 */
-.metric-box-val {
-  font-size: 20px;
+/* 탭 내 제목 */
+.section-label {
+  font-size: 15px;
   font-weight: 500;
-  color: #1a1a2e;
-  line-height: 1;
+  color: #555555;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
 }
 
-/* 단위 */
-.metric-box-unit {
-  font-size: 13px;
-  color: #686868;
+/* 탭 - 기본, 공장 상세 */
+button[data-baseweb="tab"] p {
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  color: #4f4f4f !important;
+}
+/* 탭 - 선택 */
+button[data-baseweb="tab"][aria-selected="true"] p {
+  color: #0b3680 !important;
+  font-weight: 600 !important;
+}
+/* 탭 - 가로선 */
+div[data-baseweb="tab-highlight"] {
+  background-color: #0b3680 !important;
+  height: 3px !important;
 }
 
-/* 보조 글씨*/
-.metric-box-trend {
-  font-size: 13px;
-  margin-top: 4px;
-}
-
-/* 재고 현황 */
-.stock-box {
-  background: #f5f6f8 !important;
-  border-radius: 8px !important;
-  padding: 12px 14px !important;
-  min-height: 118px;
-  overflow: hidden;
-}
-
-.st-key-fcbtn_0 button,
-.st-key-fcbtn_1 button,
-.st-key-fcbtn_2 button,
-.st-key-fcbtn_3 button,
-.st-key-stopbtn_0 button,
-.st-key-stopbtn_1 button,
-.st-key-stopbtn_2 button,
-.st-key-stopbtn_3 button,
-.st-key-recoverbtn_0 button,
-.st-key-recoverbtn_1 button,
-.st-key-recoverbtn_2 button,
-.st-key-recoverbtn_3 button {
-  white-space: nowrap !important;
-  word-break: keep-all !important;
-  font-size: 13px !important;
-  padding: 6px 8px !important;
-  min-height: 38px !important;
-}
-
+/* 공장 상세 정보 - 설비 상태 */
 .equip-item {
   background: #f5f6f8;
   border: 0.5px solid #e0e3ea;
@@ -326,6 +349,7 @@
   margin-top: 2px;
 }
 
+/* 공장 상세 정보 - 경보 문열림 */
 .alarm-item {
   border-radius: 6px;
   padding: 8px 12px;
@@ -340,9 +364,9 @@
   padding: 14px;
 }
 .card-title {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 480;
-  color: #262626;
+  color: #2f2f2f;
   text-transform: uppercase;
   letter-spacing: 1.2px;
   margin-bottom: 10px;
@@ -392,22 +416,8 @@
   transition: all 0.15s !important;
 }
 
-.log-box {
-  background: #f5f6f8;
-  border-radius: 7px;
-  padding: 8px 10px;
-  font-size: 15px;
-  font-weight: 450;
-  max-height: 200px;
-  overflow-y: auto;
-}
-.log-time {
-  color: #515151;
-  margin-right: 13px;
-  font-size: 15px;
-  font-weight: 500;
-}
-
+/* 수동 제어 */
+/* 비상 정지 활성화 */
 .emg-banner {
   background: #fcebeb;
   border: 0.5px solid #f09595;
@@ -418,40 +428,7 @@
   text-align: center;
   margin-top: 8px;
 }
-
-[class*="st-key-factory_card_"] {
-  background-color: #ffffff !important;
-  border: 1.5px solid #e0e3ea !important;
-  border-radius: 10px !important;
-  padding: 14px !important;
-}
-
-[class*="st-key-factory_card_"] .factory-card-inner {
-  background-color: #ffffff !important;
-}
-
-[class*="st-key-factory_card_"] .fc-metric-box {
-  background-color: #f5f6f8 !important;
-  border-radius: 6px !important;
-  padding: 8px 10px !important;
-}
-
-[class*="st-key-factory_card_"] .stButton {
-  margin-top: 4px;
-}
-
-.fc-temp-row {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.fc-target-text {
-  font-size: 12px;
-  color: #888780;
-  margin-left: 13px;
-}
-
+/* 제어 버튼 변경 */
 div[class*="st-key-stopbtn_"] button {
   background-color: #eb585a !important;
   border-color: #eb585a !important;
@@ -475,7 +452,24 @@ div[class*="st-key-recoverbtn_"] button:hover {
   border-color: #59ba64 !important;
   color: white !important;
 }
+/* 제어 내역*/
+.log-box {
+  background: #f5f6f8;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 15px;
+  font-weight: 450;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.log-time {
+  color: #515151;
+  margin-right: 13px;
+  font-size: 15px;
+  font-weight: 500;
+}
 
+/* 알림창 */
 .alert-card {
   display: flex;
   align-items: center;
@@ -486,28 +480,23 @@ div[class*="st-key-recoverbtn_"] button:hover {
   margin-bottom: 10px;
   border: 1px solid transparent;
 }
-
 .alert-card.unacked-err {
   background: #fff0f0;
   border-color: #f5c6c6;
 }
-
 .alert-card.unacked-warn {
   background: #fff8f0;
   border-color: #f5ddb0;
 }
-
 .alert-card.unacked-info {
   background: #f0f6ff;
   border-color: #b8d4f5;
 }
-
 .alert-card.acked {
   background: #f6f6f8;
   border-color: #e8e8ec;
   opacity: 0.7;
 }
-
 .alert-dot {
   width: 10px;
   height: 10px;
@@ -516,21 +505,18 @@ div[class*="st-key-recoverbtn_"] button:hover {
   margin-right: 8px;
   flex-shrink: 0;
 }
-
 .alert-title {
   font-size: 14px;
   font-weight: 600;
   display: flex;
   align-items: center;
 }
-
 .alert-meta {
   font-size: 11px;
   color: #999;
   margin-top: 4px;
   padding-left: 18px;
 }
-
 .alert-badge {
   font-size: 11px;
   font-weight: 600;
@@ -542,17 +528,14 @@ div[class*="st-key-recoverbtn_"] button:hover {
   gap: 4px;
   flex-shrink: 0;
 }
-
 .alert-badge.unacked {
   background: #fde8e8;
   color: #e24b4a;
 }
-
 .alert-badge.acked {
   background: #eef0f5;
   color: #888;
 }
-
 .alert-sub-message {
   font-size: 12px;
   font-weight: 500;
@@ -561,7 +544,41 @@ div[class*="st-key-recoverbtn_"] button:hover {
   line-height: 1.4;
 }
 
-.cool-btn + div button {
-  background: #378add !important;
-  color: white !important;
+/* 챗봇 */
+.floating-chat-btn {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid #e0e3ea;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.floating-chat-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+}
+.floating-chat-btn img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+.floating-chat-btn,
+.floating-chat-btn:visited,
+.floating-chat-btn:active,
+.floating-chat-btn:focus,
+.floating-chat-btn:focus-visible {
+  border-radius: 50% !important;
+  outline: none !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16) !important;
 }
