@@ -6,7 +6,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -26,6 +26,7 @@ from routers.energy import router as energy_router
 from routers.operations import router as operations_router
 from routers.sensors import router as sensors_router
 from routers.analytics import router as analytics_router
+from routers.nl_command import router as nl_command_router
 
 app = FastAPI()
 mqtt_subscriber: MQTTSubscriber = None
@@ -45,6 +46,7 @@ app.include_router(energy_router)
 app.include_router(operations_router)
 app.include_router(sensors_router)
 app.include_router(analytics_router)
+app.include_router(nl_command_router)
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
