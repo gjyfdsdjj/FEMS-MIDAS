@@ -15,4 +15,8 @@ python-jose[cryptography]
 python-dotenv
 pytest
 pytest-asyncio
+openai-whisper
+google-genai
+openai
+python-multipart
 qrcode[pil]

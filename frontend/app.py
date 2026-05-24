@@ -31,6 +31,8 @@ def init_state() -> None:
     st.session_state.setdefault("factory_id", DEFAULT_FACTORY_IDS[0] if DEFAULT_FACTORY_IDS else 1)
     st.session_state.setdefault("last_command", None)
     st.session_state.setdefault("command_log", [])
+    st.session_state.setdefault("nl_pending_command", None)
+    st.session_state.setdefault("nl_transcript", "")
 
 
 def post_json(path: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -153,7 +155,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("MIDAS Peltier Manual Control")
+st.title("MIDAS Peltier Control")
 
 top_left, top_right = st.columns([2, 1])
 with top_left:
@@ -169,63 +171,146 @@ with top_right:
         except Exception as exc:
             st.error(str(exc))
 
-with st.form("manual_peltier_control", clear_on_submit=False):
-    node_col, factory_col, action_col = st.columns(3)
-    with node_col:
-        node_id = st.text_input("Node ID", key="node_id")
-    with factory_col:
-        factory_id = st.number_input("Factory ID", min_value=1, max_value=99, step=1, key="factory_id")
-    with action_col:
-        action = st.selectbox("Action", COMMANDS, index=0)
+manual_tab, voice_tab = st.tabs(["수동 제어", "음성 제어"])
 
-    duty_col, direction_col, seconds_col = st.columns(3)
-    with duty_col:
-        allow_high_duty = st.checkbox("Allow high duty", value=False)
-        max_duty = st.number_input("Max duty cap (%)", min_value=0.0, max_value=100.0, value=50.0, step=5.0)
-        slider_max = 100 if allow_high_duty else int(max_duty)
-        duty = st.slider("Duty (%)", min_value=0, max_value=max(0, slider_max), value=min(20, max(0, slider_max)))
-    with direction_col:
-        direction = st.radio("Direction", DIRECTIONS, horizontal=True)
-    with seconds_col:
-        seconds = st.number_input("Run seconds", min_value=0.0, max_value=86400.0, value=60.0, step=5.0)
+body: dict[str, Any] = {}
+submitted = False
+action = "START"
 
-    fan_col, timing_col, reason_col = st.columns(3)
-    with fan_col:
-        fan_active_low = st.checkbox("Fan active low", value=False)
-        keep_fan_running = st.checkbox("Keep fan on after STOP", value=True)
-    with timing_col:
-        fan_spinup = st.number_input("Fan spin-up seconds", min_value=0.0, max_value=60.0, value=2.0, step=0.5)
-        fan_cooldown = st.number_input("Fan cooldown seconds", min_value=0.0, max_value=300.0, value=30.0, step=5.0)
-    with reason_col:
-        reason = st.text_area("Reason", value="streamlit manual control", height=110)
+with manual_tab:
+    with st.form("manual_peltier_control", clear_on_submit=False):
+        node_col, factory_col, action_col = st.columns(3)
+        with node_col:
+            node_id = st.text_input("Node ID", key="node_id")
+        with factory_col:
+            factory_id = st.number_input("Factory ID", min_value=1, max_value=99, step=1, key="factory_id")
+        with action_col:
+            action = st.selectbox("Action", COMMANDS, index=0)
 
-    body = build_manual_body(
-        action=action,
-        node_id=node_id.strip(),
-        factory_id=int(factory_id),
-        duty=float(duty),
-        direction=direction,
-        seconds=float(seconds),
-        max_duty=float(max_duty),
-        allow_high_duty=allow_high_duty,
-        keep_fan_running=keep_fan_running,
-        fan_active_low=fan_active_low,
-        fan_spinup=float(fan_spinup),
-        fan_cooldown=float(fan_cooldown),
-        reason=reason.strip(),
-    )
+        duty_col, direction_col, seconds_col = st.columns(3)
+        with duty_col:
+            allow_high_duty = st.checkbox("Allow high duty", value=False)
+            max_duty = st.number_input("Max duty cap (%)", min_value=0.0, max_value=100.0, value=50.0, step=5.0)
+            slider_max = 100 if allow_high_duty else int(max_duty)
+            duty = st.slider("Duty (%)", min_value=0, max_value=max(0, slider_max), value=min(20, max(0, slider_max)))
+        with direction_col:
+            direction = st.radio("Direction", DIRECTIONS, horizontal=True)
+        with seconds_col:
+            seconds = st.number_input("Run seconds", min_value=0.0, max_value=86400.0, value=60.0, step=5.0)
 
-    submitted = st.form_submit_button("Send Command", use_container_width=True)
+        fan_col, timing_col, reason_col = st.columns(3)
+        with fan_col:
+            fan_active_low = st.checkbox("Fan active low", value=False)
+            keep_fan_running = st.checkbox("Keep fan on after STOP", value=True)
+        with timing_col:
+            fan_spinup = st.number_input("Fan spin-up seconds", min_value=0.0, max_value=60.0, value=2.0, step=0.5)
+            fan_cooldown = st.number_input("Fan cooldown seconds", min_value=0.0, max_value=300.0, value=30.0, step=5.0)
+        with reason_col:
+            reason = st.text_area("Reason", value="streamlit manual control", height=110)
 
-if submitted:
-    try:
-        result = post_json("/api/v1/control/manual", body)
-    except Exception as exc:
-        append_log(False, action, body, str(exc))
-        st.error(str(exc))
-    else:
-        append_log(True, action, body, result)
-        st.success(result.get("message", "sent"))
+        body = build_manual_body(
+            action=action,
+            node_id=node_id.strip(),
+            factory_id=int(factory_id),
+            duty=float(duty),
+            direction=direction,
+            seconds=float(seconds),
+            max_duty=float(max_duty),
+            allow_high_duty=allow_high_duty,
+            keep_fan_running=keep_fan_running,
+            fan_active_low=fan_active_low,
+            fan_spinup=float(fan_spinup),
+            fan_cooldown=float(fan_cooldown),
+            reason=reason.strip(),
+        )
+
+        submitted = st.form_submit_button("Send Command", use_container_width=True)
+
+    if submitted:
+        try:
+            result = post_json("/api/v1/control/manual", body)
+        except Exception as exc:
+            append_log(False, action, body, str(exc))
+            st.error(str(exc))
+        else:
+            append_log(True, action, body, result)
+            st.success(result.get("message", "sent"))
+
+with voice_tab:
+    mic_tab, text_tab = st.tabs(["마이크 입력", "텍스트 입력"])
+
+    with mic_tab:
+        audio = st.audio_input("마이크 버튼을 눌러 명령을 말하세요")
+        if audio and st.button("분석", key="analyze_audio"):
+            with st.spinner("음성 인식 중..."):
+                try:
+                    resp = httpx.post(
+                        f"{st.session_state['api_base_url'].rstrip('/')}/api/v1/nl-command/parse-audio",
+                        files={"file": (audio.name, audio.getvalue(), audio.type)},
+                        timeout=60.0,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    st.session_state["nl_transcript"] = data["transcript"]
+                    st.session_state["nl_pending_command"] = data["command"]
+                except Exception as exc:
+                    st.error(str(exc))
+
+    with text_tab:
+        nl_text = st.text_area("명령을 입력하세요", placeholder="온도가 높으니까 펠티어 30%로 1분만 돌리고 팬도 같이 켜줘")
+        if st.button("분석", key="analyze_text"):
+            with st.spinner("분석 중..."):
+                try:
+                    resp = httpx.post(
+                        f"{st.session_state['api_base_url'].rstrip('/')}/api/v1/nl-command/parse-text",
+                        json={"text": nl_text},
+                        timeout=15.0,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    st.session_state["nl_transcript"] = data["transcript"]
+                    st.session_state["nl_pending_command"] = data["command"]
+                except Exception as exc:
+                    st.error(str(exc))
+
+    if st.session_state["nl_pending_command"]:
+        cmd = st.session_state["nl_pending_command"]
+        st.info(f"인식된 명령: {st.session_state['nl_transcript']}")
+        st.caption(cmd.get("summary", ""))
+        st.json(cmd)
+
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("실행하기", use_container_width=True, type="primary"):
+                nl_body: dict[str, Any] = {
+                    "node_id": st.session_state["node_id"].strip(),
+                    "factory_id": int(st.session_state["factory_id"]),
+                    "action": cmd["action"],
+                    "reason": f"음성 명령: {cmd.get('summary', '')}",
+                    "allow_high_duty": False,
+                    "max_duty": 100.0,
+                }
+                if cmd.get("value") is not None:
+                    nl_body["value"] = cmd["value"]
+                if cmd.get("direction"):
+                    nl_body["direction"] = cmd["direction"]
+                if cmd.get("seconds") is not None:
+                    nl_body["seconds"] = cmd["seconds"]
+                if cmd.get("keep_fan_running") is not None:
+                    nl_body["keep_fan_running"] = cmd["keep_fan_running"]
+                if cmd.get("fan_cooldown_sec") is not None:
+                    nl_body["fan_cooldown_seconds"] = cmd["fan_cooldown_sec"]
+                try:
+                    result = post_json("/api/v1/control/manual", nl_body)
+                    append_log(True, cmd["action"], nl_body, result)
+                    st.success("명령 전송 완료")
+                    st.session_state["nl_pending_command"] = None
+                except Exception as exc:
+                    st.error(str(exc))
+        with cancel_col:
+            if st.button("취소", use_container_width=True):
+                st.session_state["nl_pending_command"] = None
+                st.rerun()
 
 status_data, status_error = load_control_status(
     st.session_state["node_id"].strip(),
@@ -373,3 +458,4 @@ with st.expander("Command Log", expanded=False):
     for entry in st.session_state["command_log"]:
         st.write(f"{entry['time']} / {entry['action']} / {'OK' if entry['ok'] else 'ERROR'}")
         st.json({"body": entry["body"], "result": entry["result"]})
+
