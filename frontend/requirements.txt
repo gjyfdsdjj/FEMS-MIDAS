@@ -4,3 +4,4 @@ requests
 plotly
 pandas
 python-dotenv
+json5

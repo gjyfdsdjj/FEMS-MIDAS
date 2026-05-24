@@ -330,6 +330,22 @@
   // ── 환경 가중치 (기상청 API 기반, 매일 18시 갱신) ─────────────────
   "environment_weights": {
     "date": "2026-04-03",                     // 내일 예측 기준
+    // 태양광 NWP 서비스: true면 prediction_service(키 필요). 데모 타임라인 고정이면 false로 더미 predict_solar 사용
+    "use_service_solar": false,
+    // 일별 실측·NWP 일합계 더미로 시간별 태양광 예측 스케일 보정(§8-2 데모, DB 없음)
+    "use_dummy_solar_calibration": true,
+    "solar_calibration_window_days": 30,
+    // 1차 보정: scale(α만) | residual_mean | scale_and_residual — 잔차·흐린날 검증은 data_source=residual_demo
+    "solar_calibration_mode": "scale",
+    "solar_calibration_data_source": "main",
+    "solar_calibration_residual_distribution": "proportional",
+    // ③ Prophet α 보정 (D1·D5~D7): true면 daily_alpha_series로 Prophet 학습해 내일 α 예측.
+    // true(기본): Prophet α 우선. 미설치·학습 실패·일수 부족 시 rolling mean fallback.
+    "use_solar_prophet_alpha": true,
+    "solar_prophet_window_days": 30,
+    "solar_prophet_min_rows": 14,
+    "kma_lat": 35.8,                          // NWP 지점 위도 — 영남대학교 IT관
+    "kma_lon": 128.7,                         // NWP 지점 경도 — 영남대학교 IT관
     "w_temp": 1.0,                            // 평년 수준 (폭염이면 1.2)
     "w_solar": 0.5,                           // 흐린 날 (맑으면 1.0, 비면 0.2)
     "inbound_cooling_c_per_unit": 0.09,       // 입고 1단위당 필요한 추가 냉각량(도씨 환산)
@@ -405,6 +421,116 @@
     {"timestamp": "2026-04-02T17:00:00+09:00", "predicted_solar_kwh": 0.4},
     {"timestamp": "2026-04-02T18:00:00+09:00", "predicted_solar_kwh": 0.1}
   ],
+
+  // ── 태양광 일별 실측(합성 더미, §8-2 보정·학습용) ────────────────────
+  // 기간: 2026-04-15 ~ 2026-05-14 (30일, KST 달력). 기준일 2026-05-14 가정.
+  // 패턴: 말→초순으로 일합계 서서히 증가. 흐린날·잔차 직접 확인은 아래 solar_calibration_residual_demo 권장.
+  "actual_solar_daily_kwh": [
+    { "date": "2026-04-15", "actual_kwh": 8.4, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-16", "actual_kwh": 8.7, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-17", "actual_kwh": 8.92, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-18", "actual_kwh": 8.39, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-19", "actual_kwh": 8.39, "source": "DUMMY_SYNTHETIC" },
+    // 흐린날 · 잔차 테스트용 (실측 급감 — 같은 날 NWP는 nwp_predicted_daily_kwh 행 참고)
+    { "date": "2026-04-20", "actual_kwh": 5.4, "day_type": "CLOUDY", "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-21", "actual_kwh": 8.99, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-22", "actual_kwh": 9.1, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-23", "actual_kwh": 9.32, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-24", "actual_kwh": 9.61, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-25", "actual_kwh": 9.22, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-26", "actual_kwh": 9.42, "source": "DUMMY_SYNTHETIC" },
+    // 흐린날 · 잔차 테스트용
+    { "date": "2026-04-27", "actual_kwh": 5.6, "day_type": "CLOUDY", "source": "DUMMY_SYNTHETIC" },
+    // 맑은날 · 잔차 비교용 (이웃 흐린날과 residual 크기 비교)
+    { "date": "2026-04-28", "actual_kwh": 10.23, "day_type": "CLEAR", "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-29", "actual_kwh": 10.19, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-04-30", "actual_kwh": 10.2, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-01", "actual_kwh": 10.31, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-02", "actual_kwh": 9.79, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-03", "actual_kwh": 10.07, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-04", "actual_kwh": 11.12, "source": "DUMMY_SYNTHETIC" },
+    // 맑은날 · 잔차 비교용
+    { "date": "2026-05-05", "actual_kwh": 11.34, "day_type": "CLEAR", "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-06", "actual_kwh": 11.44, "source": "DUMMY_SYNTHETIC" },
+    // 흐린날 · 잔차 테스트용
+    { "date": "2026-05-07", "actual_kwh": 5.2, "day_type": "CLOUDY", "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-08", "actual_kwh": 11.4, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-09", "actual_kwh": 10.61, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-10", "actual_kwh": 10.71, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-11", "actual_kwh": 11.75, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-12", "actual_kwh": 12.04, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-13", "actual_kwh": 12.34, "source": "DUMMY_SYNTHETIC" },
+    { "date": "2026-05-14", "actual_kwh": 12.55, "source": "DUMMY_SYNTHETIC" }
+  ],
+
+  // ── 태양광 일별 NWP 예측 합계(predict_solar_daily_total·KMA 허브, actual_solar_daily_kwh 날짜 1:1) ──
+  "nwp_predicted_daily_kwh": [
+    { "date": "2026-04-15", "nwp_predicted_daily_kwh": 495.132, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026041506" },
+    { "date": "2026-04-16", "nwp_predicted_daily_kwh": 523.666, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026041606" },
+    { "date": "2026-04-17", "nwp_predicted_daily_kwh": 18.75, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026041706" },
+    { "date": "2026-04-18", "nwp_predicted_daily_kwh": 496.485, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026041806" },
+    { "date": "2026-04-19", "nwp_predicted_daily_kwh": 365.248, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026041906" },
+    // 흐린날 · 잔차 테스트용 (NWP 맑음 가정·과대 — actual 5.4 → residual 약 -5.6)
+    { "date": "2026-04-20", "nwp_predicted_daily_kwh": 11.0, "source": "DUMMY_RESIDUAL_DEMO", "nwp_tm_utc": "" },
+    { "date": "2026-04-21", "nwp_predicted_daily_kwh": 528.732, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026042106" },
+    { "date": "2026-04-22", "nwp_predicted_daily_kwh": 396.398, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026042206" },
+    { "date": "2026-04-23", "nwp_predicted_daily_kwh": 635.738, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026042306" },
+    { "date": "2026-04-24", "nwp_predicted_daily_kwh": 527.892, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026042406" },
+    { "date": "2026-04-25", "nwp_predicted_daily_kwh": 545.736, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026042506" },
+    { "date": "2026-04-26", "nwp_predicted_daily_kwh": 453.48, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026042606" },
+    // 흐린날 · 잔차 테스트용 (actual 5.6 → residual 약 -5.3)
+    { "date": "2026-04-27", "nwp_predicted_daily_kwh": 10.9, "source": "DUMMY_RESIDUAL_DEMO", "nwp_tm_utc": "" },
+    // 맑은날 · 잔차 비교용 (actual≈nwp, |잔차| 작음)
+    { "date": "2026-04-28", "nwp_predicted_daily_kwh": 10.8, "source": "DUMMY_RESIDUAL_DEMO", "nwp_tm_utc": "" },
+    { "date": "2026-04-29", "nwp_predicted_daily_kwh": 593.548, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026042906" },
+    { "date": "2026-04-30", "nwp_predicted_daily_kwh": 562.302, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026043006" },
+    { "date": "2026-05-01", "nwp_predicted_daily_kwh": 461.358, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026050106" },
+    { "date": "2026-05-02", "nwp_predicted_daily_kwh": 475.878, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026050206" },
+    { "date": "2026-05-03", "nwp_predicted_daily_kwh": 90.827, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026050306" },
+    { "date": "2026-05-04", "nwp_predicted_daily_kwh": 471.054, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026050406" },
+    // 맑은날 · 잔차 비교용
+    { "date": "2026-05-05", "nwp_predicted_daily_kwh": 11.2, "source": "DUMMY_RESIDUAL_DEMO", "nwp_tm_utc": "" },
+    { "date": "2026-05-06", "nwp_predicted_daily_kwh": 534.007, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026050606" },
+    // 흐린날 · 잔차 테스트용 (actual 5.2 → residual 약 -5.9)
+    { "date": "2026-05-07", "nwp_predicted_daily_kwh": 11.1, "source": "DUMMY_RESIDUAL_DEMO", "nwp_tm_utc": "" },
+    { "date": "2026-05-08", "nwp_predicted_daily_kwh": 482.001, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026050806" },
+    { "date": "2026-05-09", "nwp_predicted_daily_kwh": 687.393, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026050906" },
+    { "date": "2026-05-10", "nwp_predicted_daily_kwh": 506.163, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026051006" },
+    { "date": "2026-05-11", "nwp_predicted_daily_kwh": 425.029, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026051106" },
+    { "date": "2026-05-12", "nwp_predicted_daily_kwh": 236.409, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026051206" },
+    { "date": "2026-05-13", "nwp_predicted_daily_kwh": 603.629, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026051306" },
+    { "date": "2026-05-14", "nwp_predicted_daily_kwh": 1405.98, "source": "KMA_NWP_predict_solar_daily_total", "nwp_tm_utc": "2026051400" }
+  ],
+
+  // ── 잔차·흐린날 검증 전용 (actual·NWP 동일 kWh 스케일, 위 30일 API NWP와 별도) ──
+  // residuals_from_daily_pairs / 발표 확인 시 이 블록 사용. 흐린날은 |잔차|가 맑은날보다 큼.
+  "solar_calibration_residual_demo": {
+    "note": "흐린날·잔차 테스트용 더미 — day_type CLOUDY|CLEAR",
+    "actual_solar_daily_kwh": [
+      { "date": "2026-05-20", "actual_kwh": 10.6, "day_type": "CLEAR", "source": "DUMMY_RESIDUAL_DEMO" },
+      { "date": "2026-05-21", "actual_kwh": 10.4, "day_type": "CLEAR", "source": "DUMMY_RESIDUAL_DEMO" },
+      // 흐린날 · 잔차 테스트용
+      { "date": "2026-05-22", "actual_kwh": 5.0, "day_type": "CLOUDY", "source": "DUMMY_RESIDUAL_DEMO" },
+      { "date": "2026-05-23", "actual_kwh": 10.8, "day_type": "CLEAR", "source": "DUMMY_RESIDUAL_DEMO" },
+      // 흐린날 · 잔차 테스트용
+      { "date": "2026-05-24", "actual_kwh": 4.8, "day_type": "CLOUDY", "source": "DUMMY_RESIDUAL_DEMO" },
+      // 흐린날 · 잔차 테스트용
+      { "date": "2026-05-25", "actual_kwh": 5.3, "day_type": "CLOUDY", "source": "DUMMY_RESIDUAL_DEMO" },
+      { "date": "2026-05-26", "actual_kwh": 11.0, "day_type": "CLEAR", "source": "DUMMY_RESIDUAL_DEMO" }
+    ],
+    "nwp_predicted_daily_kwh": [
+      { "date": "2026-05-20", "nwp_predicted_daily_kwh": 10.9, "source": "DUMMY_RESIDUAL_DEMO" },
+      { "date": "2026-05-21", "nwp_predicted_daily_kwh": 11.0, "source": "DUMMY_RESIDUAL_DEMO" },
+      // 흐린날 · 잔차 테스트용 (NWP는 맑음 수준, 실측만 낮음)
+      { "date": "2026-05-22", "nwp_predicted_daily_kwh": 11.1, "source": "DUMMY_RESIDUAL_DEMO" },
+      { "date": "2026-05-23", "nwp_predicted_daily_kwh": 11.0, "source": "DUMMY_RESIDUAL_DEMO" },
+      // 흐린날 · 잔차 테스트용
+      { "date": "2026-05-24", "nwp_predicted_daily_kwh": 10.8, "source": "DUMMY_RESIDUAL_DEMO" },
+      // 흐린날 · 잔차 테스트용
+      { "date": "2026-05-25", "nwp_predicted_daily_kwh": 11.2, "source": "DUMMY_RESIDUAL_DEMO" },
+      { "date": "2026-05-26", "nwp_predicted_daily_kwh": 10.7, "source": "DUMMY_RESIDUAL_DEMO" }
+    ]
+  },
 
   // ── 예지 보전 진단 (Isolation Forest + Prophet 결합) ─────────────
   // health_score: 1.0=완전정상 / 0.6 이하=주의 / 0.4 이하=교체 권고

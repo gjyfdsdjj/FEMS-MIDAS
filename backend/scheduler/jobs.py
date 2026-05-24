@@ -73,12 +73,34 @@ if load_dotenv is not None:
 try:
     from backend.services import tou_service
 except Exception:  # pragma: no cover - optional integration fallback
-    tou_service = None  # type: ignore
+    try:
+        from services import tou_service  # type: ignore
+    except Exception:
+        tou_service = None  # type: ignore
 
 try:
     from backend.services import weather_service
 except Exception:  # pragma: no cover - optional integration fallback
-    weather_service = None  # type: ignore
+    try:
+        from services import weather_service  # type: ignore
+    except Exception:
+        weather_service = None  # type: ignore
+
+try:
+    from backend.services import prediction_service
+except Exception:  # pragma: no cover - optional integration fallback
+    try:
+        from services import prediction_service  # type: ignore
+    except Exception:
+        prediction_service = None  # type: ignore
+
+try:
+    from backend.services import optimization_service  # type: ignore
+except Exception:
+    try:
+        from services import optimization_service  # type: ignore
+    except Exception:
+        optimization_service = None  # type: ignore
 
 try:
     from backend.services import anomaly_service
@@ -293,6 +315,216 @@ def _solar_forecast_for_horizon(
     return rows
 
 
+def _normalize_ts_for_compare(ts: datetime, ref: datetime) -> datetime:
+    """aware/naive 혼용 비교를 피하기 위해 기준 시각(ref) 형태로 정규화한다."""
+    if ref.tzinfo is None and ts.tzinfo is not None:
+        return ts.replace(tzinfo=None)
+    if ref.tzinfo is not None and ts.tzinfo is None:
+        return ts.replace(tzinfo=ref.tzinfo)
+    return ts
+
+
+def _service_solar_forecast_for_horizon(
+    now: datetime,
+    deadline: datetime | None,
+    env_weights: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """prediction_service.predict_solar를 사용해 horizon 범위 태양광 예측을 구성한다."""
+    if prediction_service is None or not hasattr(prediction_service, "predict_solar"):
+        return []
+
+    if deadline is None or deadline <= now:
+        deadline = now + timedelta(hours=24)
+
+    lat = float(env_weights.get("kma_lat", 37.5))
+    lon = float(env_weights.get("kma_lon", 127.0))
+
+    start_day = now.date()
+    end_day = deadline.date()
+    day_cursor = start_day
+    rows: list[dict[str, Any]] = []
+
+    while day_cursor <= end_day:
+        target = day_cursor.strftime("%Y%m%d")
+        try:
+            daily_rows = asyncio.run(
+                prediction_service.predict_solar(
+                    target_date=target,
+                    lat=lat,
+                    lon=lon,
+                )
+            )
+        except Exception:
+            daily_rows = []
+
+        for row in daily_rows:
+            if not isinstance(row, dict):
+                continue
+            ts = _parse_iso(row.get("timestamp"))
+            if ts is None:
+                continue
+            ts_cmp = _normalize_ts_for_compare(ts, now)
+            if now <= ts_cmp <= deadline:
+                rows.append(
+                    {
+                        "timestamp": ts.isoformat(),
+                        "predicted_solar_kwh": float(row.get("predicted_solar_kwh", 0.0)),
+                    }
+                )
+
+        day_cursor += timedelta(days=1)
+
+    rows.sort(key=lambda x: str(x.get("timestamp", "")))
+    return rows
+
+
+def _resolve_prophet_alpha_override(
+    env_weights: dict[str, Any],
+    actual: list[dict[str, Any]],
+    nwp: list[dict[str, Any]],
+    fallback_window: int,
+    *,
+    daily_alpha_series_fn: Any,
+) -> tuple[float | None, dict[str, Any] | None]:
+    """``use_solar_prophet_alpha`` 가 true일 때 Prophet α 예측을 시도한다.
+
+    실패·미설치·일수 부족 시 ``(None, meta)`` 로 폴백(=apply_solar_calibration에서
+    rolling mean α가 사용됨). Job A 결과 meta에는 항상 Prophet 메타가 함께 실린다.
+    """
+    if not env_weights.get("use_solar_prophet_alpha"):
+        return None, None
+
+    try:
+        from backend.services.solar_prophet import forecast_alpha_for_date
+    except ImportError:
+        try:
+            from services.solar_prophet import forecast_alpha_for_date  # type: ignore
+        except ImportError:
+            return None, {
+                "alpha_forecast": None,
+                "source": "module_unavailable",
+                "error": "solar_prophet import failed",
+            }
+
+    try:
+        prophet_window = int(env_weights.get("solar_prophet_window_days", fallback_window))
+    except (TypeError, ValueError):
+        prophet_window = fallback_window
+    try:
+        min_rows = int(env_weights.get("solar_prophet_min_rows", 14))
+    except (TypeError, ValueError):
+        min_rows = 14
+
+    series = daily_alpha_series_fn(actual, nwp)
+    prophet_meta = forecast_alpha_for_date(
+        series,
+        window_days=prophet_window,
+        min_rows=min_rows,
+    )
+    alpha_forecast = prophet_meta.get("alpha_forecast")
+    override = (
+        float(alpha_forecast)
+        if isinstance(alpha_forecast, (int, float)) and float(alpha_forecast) > 0
+        else None
+    )
+    return override, prophet_meta
+
+
+def _apply_solar_calibration_from_data(
+    data: dict[str, Any],
+    env_weights: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """일별 실측·NWP 쌍으로 1차 보정(scale / residual_mean / scale_and_residual).
+
+    ``use_solar_prophet_alpha`` 가 true이면 ``solar_prophet.forecast_alpha_for_date``
+    결과를 ``apply_solar_calibration(alpha_override=...)`` 로 전달해 rolling mean α를
+    대체한다. Prophet 메타는 ``meta["prophet"]`` 에 보관(실측·디버깅용).
+    """
+    if not env_weights.get("use_dummy_solar_calibration"):
+        return rows, None
+    try:
+        from backend.services.solar_calibration import (
+            apply_solar_calibration,
+            calibration_daily_rows_from_data,
+            daily_alpha_series,
+            parse_calibration_mode,
+        )
+    except ImportError:
+        try:
+            from services.solar_calibration import (
+                apply_solar_calibration,
+                calibration_daily_rows_from_data,
+                daily_alpha_series,
+                parse_calibration_mode,
+            )
+        except ImportError:
+            return rows, None
+
+    actual, nwp = calibration_daily_rows_from_data(data, env_weights)
+    if not actual or not nwp or not rows:
+        return rows, None
+    try:
+        window = int(env_weights.get("solar_calibration_window_days", 30))
+    except (TypeError, ValueError):
+        window = 30
+    dist = str(env_weights.get("solar_calibration_residual_distribution", "proportional"))
+    if dist not in ("proportional", "uniform"):
+        dist = "proportional"
+    mode = parse_calibration_mode(env_weights)
+
+    alpha_override, prophet_meta = _resolve_prophet_alpha_override(
+        env_weights,
+        actual,
+        nwp,
+        fallback_window=window,
+        daily_alpha_series_fn=daily_alpha_series,
+    )
+
+    rows_out, meta = apply_solar_calibration(
+        rows,
+        actual,
+        nwp,
+        mode=mode,
+        window_days=window,
+        residual_distribution=dist,  # type: ignore[arg-type]
+        alpha_override=alpha_override,
+    )
+    if prophet_meta is not None:
+        meta["prophet"] = prophet_meta
+    if not meta.get("applied"):
+        return rows, None
+    return rows_out, meta
+
+
+def _resolve_solar_forecast(
+    data: dict[str, Any],
+    now: datetime,
+    deadline: datetime | None,
+    env_weights: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str, dict[str, Any] | None]:
+    """태양광 예측 입력을 서비스 우선으로 구성하고 실패 시 더미로 폴백한다."""
+    use_service_solar = bool(env_weights.get("use_service_solar", True))
+    rows: list[dict[str, Any]]
+    src: str
+    if use_service_solar:
+        service_rows = _service_solar_forecast_for_horizon(
+            now=now,
+            deadline=deadline,
+            env_weights=env_weights,
+        )
+        if service_rows:
+            rows, src = service_rows, "SERVICE"
+        else:
+            rows = _solar_forecast_for_horizon(data, now, deadline)
+            src = "DUMMY"
+    else:
+        rows = _solar_forecast_for_horizon(data, now, deadline)
+        src = "DUMMY"
+    rows, cal_meta = _apply_solar_calibration_from_data(data, env_weights, rows)
+    return rows, src, cal_meta
+
+
 def _outdoor_temp_forecast_for_horizon(
     data: dict[str, Any],
     now: datetime,
@@ -491,13 +723,9 @@ def _heuristic_blocks(ctx: JobAContext) -> list[dict[str, Any]]:
 
 def _run_optimization_with_fallback(ctx: JobAContext) -> list[dict[str, Any]]:
     """optimization_service.run_optimization이 있으면 호출하고, 없으면 휴리스틱으로 대체한다."""
-    try:
-        from backend.services import optimization_service  # type: ignore
-    except Exception:
-        optimization_service = None  # type: ignore
-
-    if optimization_service and hasattr(optimization_service, "run_optimization"):
-        return optimization_service.run_optimization(  # type: ignore[no-any-return]
+    opt = optimization_service
+    if opt is not None and hasattr(opt, "run_optimization"):
+        return opt.run_optimization(  # type: ignore[no-any-return]
             job=ctx.active_job,
             sensor_states=ctx.factories,
             tou_prices=ctx.tou_slots,
@@ -580,7 +808,12 @@ def run_job_a_optimization(
     tou_price, tou_price_source = get_tou_price_with_source(resolved_now, pricing_tou)
     deadline = _parse_iso(active_job.get("deadline_at"))
     env_weights = data.get("environment_weights", {})
-    solar_forecast = _solar_forecast_for_horizon(data, resolved_now, deadline)
+    solar_forecast, solar_forecast_source, solar_calibration_meta = _resolve_solar_forecast(
+        data=data,
+        now=resolved_now,
+        deadline=deadline,
+        env_weights=env_weights,
+    )
     outdoor_temp_forecast, outdoor_temp_source = _resolve_outdoor_temp_forecast(
         data=data,
         now=resolved_now,
@@ -644,13 +877,9 @@ def run_job_a_optimization(
     )
     blocks = _run_optimization_with_fallback(ctx)
     optimization_debug: dict[str, Any] | None = None
-    try:
-        from backend.services import optimization_service  # type: ignore
-
-        if hasattr(optimization_service, "get_last_optimization_debug"):
-            optimization_debug = optimization_service.get_last_optimization_debug()  # type: ignore[assignment]
-    except Exception:
-        optimization_debug = None
+    opt = optimization_service
+    if opt is not None and hasattr(opt, "get_last_optimization_debug"):
+        optimization_debug = opt.get_last_optimization_debug()  # type: ignore[assignment]
 
     target_units = int(active_job.get("target_units", 0))
     produced_units = int(active_job.get("produced_units", 0))
@@ -662,6 +891,44 @@ def run_job_a_optimization(
         "job_id": active_job.get("job_id"),
         "tou_price_krw_per_kwh": tou_price,
         "tou_price_source": tou_price_source,
+        "solar_forecast_source": solar_forecast_source,
+        "solar_calibration_alpha": (
+            float(solar_calibration_meta["alpha"])
+            if solar_calibration_meta and solar_calibration_meta.get("alpha") is not None
+            else None
+        ),
+        "solar_calibration_mode": (
+            solar_calibration_meta.get("mode") if solar_calibration_meta else None
+        ),
+        "solar_mean_residual_kwh": (
+            solar_calibration_meta.get("mean_residual_kwh")
+            if solar_calibration_meta
+            else None
+        ),
+        "solar_calibration_applied": (
+            bool(solar_calibration_meta.get("applied")) if solar_calibration_meta else False
+        ),
+        "solar_alpha_source": (
+            solar_calibration_meta.get("alpha_source") if solar_calibration_meta else None
+        ),
+        "solar_rolling_alpha": (
+            solar_calibration_meta.get("rolling_alpha") if solar_calibration_meta else None
+        ),
+        "solar_alpha_forecast": (
+            (solar_calibration_meta.get("prophet") or {}).get("alpha_forecast")
+            if solar_calibration_meta
+            else None
+        ),
+        "solar_prophet_source": (
+            (solar_calibration_meta.get("prophet") or {}).get("source")
+            if solar_calibration_meta
+            else None
+        ),
+        "solar_prophet_forecast_date": (
+            (solar_calibration_meta.get("prophet") or {}).get("forecast_date")
+            if solar_calibration_meta
+            else None
+        ),
         "outdoor_temp_source": outdoor_temp_source,
         "remaining_units": remaining_units,
         "factory_count": len(factories),
