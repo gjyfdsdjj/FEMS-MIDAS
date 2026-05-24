@@ -1,6 +1,8 @@
 import streamlit as st
 import plotly.graph_objects as go
 import random
+import base64
+from pathlib import Path
 
 
 @st.dialog("공장 상세 정보", width="large")
@@ -15,25 +17,91 @@ def factory_detail(
     sparkline_fig,
     temp_predict_fig,
     temp_trend_fig,
+    issue_qr_token,
 ):
     sc = status_color(f["status"])
     sb = status_bg(f["status"])
     st_txt = status_text(f["status"])
     maint = get_maintenance_info(f["factory_id"])
+    qr_icon_path = Path(__file__).resolve().parents[2] / "assets" / "qr.png"
+    qr_icon_base64 = base64.b64encode(qr_icon_path.read_bytes()).decode()
 
-    st.markdown(f"""
-    <div style="display:flex;align-items:center; gap:15px; margin-bottom:-10px">
-        <div style="font-size:17px;font-weight:500;color:#1a1a2e">
-            {f['name']}
-            <span style="font-size:13px;color:#888780;font-weight:400">&nbsp;{f['id']}</span>
+    title_col, qr_col = st.columns([8, 1])
+
+    with title_col:
+        st.markdown(f"""
+        <div style="display:flex;align-items:center; gap:15px; margin-bottom:-10px">
+            <div style="font-size:20px;font-weight:500;color:#1a1a2e">
+                {f['name']}
+                <span style="font-size:13px;color:#888780;font-weight:400">&nbsp;{f['id']}</span>
+            </div>
+            <span class="badge" style="background:{sb};color:{sc};font-size:13px;padding:5px 14px;">
+                {st_txt}
+            </span>
         </div>
-        <span class="badge" style="background:{sb};color:{sc};font-size:13px;padding:5px 14px;">
-            {st_txt}
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown("""
+    <style>
+    .st-key-qr_popover_wrap {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: -6px;
+    }
+
+    .st-key-qr_popover_wrap div[data-testid="stPopover"] button {
+        white-space: nowrap !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    with qr_col:
+        if f["factory_id"] == 1:
+            with st.container(key="qr_popover_wrap"):
+                with st.popover("QR 코드"):
+                    qr_key = f"qr_data_{f['factory_id']}"
+                    qr_data = st.session_state.get(qr_key)
+
+                    button_area = st.empty()
+
+                    if not qr_data:
+                        with button_area:
+                            clicked = st.button("QR 코드 발급", key=f"qr_issue_{f['factory_id']}")
+
+                        if clicked:
+                            with st.spinner(""):
+                                result = issue_qr_token(f["factory_id"])
+
+                            if result and result.get("success"):
+                                st.session_state[qr_key] = result["data"]
+                                qr_data = result["data"]
+                                button_area.empty()
+                            else:
+                                st.error("QR 발급에 실패했습니다.")
+                                st.write(result)
+
+                    if qr_data:
+                        st.success("발급 완료")
+                        st.image(qr_data["qr_code_base64"], width=160)
+                        st.markdown(f"""
+                        <div style="
+                            width: 280px;
+                            font-size: 15px;
+                            word-break: break-all;
+                            line-height: 1.5;
+                            background: #f8f8f6;
+                            border: 1px solid #e0e3ea;
+                            border-radius: 6px;
+                            padding: 8px;
+                        ">
+                            {qr_data["readonly_url"]}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.caption(f"만료 시간: {qr_data['expires_at']}")
+    st.markdown(
+    "<hr style='margin:-20px 0 20px 0; border:none; border-top:1px solid #e0e3ea;'>",
+    unsafe_allow_html=True
+)
 
     dm1, dm2, dm3, dm4 = st.columns(4)
 

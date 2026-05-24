@@ -5,9 +5,39 @@ import plotly.graph_objects as go
 import time
 import sys
 import base64
+import requests
 from pathlib import Path
 from datetime import datetime
 
+API_BASE_URL = "http://localhost:8000"
+
+def issue_qr_token(factory_id):
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/api/v1/readonly/tokens",
+            json={
+                "factory_id": factory_id,
+                "expires_in_minutes": 60
+            },
+            timeout=8
+        )
+
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "message": f"status_code: {response.status_code}",
+                "detail": response.text,
+            }
+
+        return response.json()
+
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "message": "request exception",
+            "detail": str(e),
+        }
+    
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from components.main.factory_detail import factory_detail
@@ -27,6 +57,7 @@ from components.main.data_helpers import (
     get_door_events,
     make_equip,
 )
+
 
 st.set_page_config(
     page_title="MIDAS FEMS 대시보드",
@@ -423,6 +454,7 @@ with main_col:
                 sparkline_fig,
                 temp_predict_fig,
                 temp_trend_fig,
+                issue_qr_token,
             ),
             log_action,
         )
