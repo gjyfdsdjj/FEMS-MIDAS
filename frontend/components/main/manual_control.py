@@ -7,7 +7,7 @@ def manual_control(log_action):
     st.markdown('<div class="card-title">수동 제어</div>', unsafe_allow_html=True)
 
     manual_stop_color = (
-        "#1d9e75"
+        "#24a05c"
         if st.session_state.get("manual_stop_active", False)
         else "#e24b4a"
     )
@@ -76,6 +76,9 @@ def manual_control(log_action):
                     else:
                         log_action(f"{label} 복구")
                 else:
+                    for reset_key, _ in controls:
+                        st.session_state[reset_key] = False
+
                     st.session_state[state_key] = True
 
                     if state_key == "manual_stop_active":
