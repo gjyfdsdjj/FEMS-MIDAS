@@ -26,7 +26,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.repositories.alert_repository import check_duplicate_alert, insert_alert
+from repositories.alert_repository import check_duplicate_alert, insert_alert, update_alert_acknowledge
 
 logger = logging.getLogger(__name__)
 
@@ -71,15 +71,40 @@ async def create_alert(db: AsyncSession, factory_id: int, priority: str, alert_t
         return None
         
     # 중복이 아니면 DB에 저장 
-    # (DDL의 컬럼명이 priority이므로 레포지토리 함수 인자에는 level 값을 priority로 넘겨줌)
     new_alert = await insert_alert(db, factory_id, priority=priority, alert_type=alert_type, message=message)
     
     # 4. CRITICAL / WARNING 이면 send_telegram 호출
-    if level.lower() in ["critical", "warning"]:
-        telegram_msg = f"⚠️ [{level.upper()}] 공장 {factory_id}번 알림\n타입: {alert_type}\n내용: {message}"
+    if priority.lower() in ["critical", "warning"]:
+        telegram_msg = f"⚠️ [{priority.upper()}] 공장 {factory_id}번 알림\n타입: {alert_type}\n내용: {message}"
         await send_telegram(telegram_msg)
         
     return new_alert
+
+# 관리자가 알림을 확인했을 때 처리 (ack_at 업데이트)
+async def acknowledge_alert(db: AsyncSession, alert_id: int):
+
+    updated_alert = await update_alert_acknowledge(db, alert_id)
+
+    if updated_alert is None:
+        logger.warning(f"존재하지 않는 알림 ID입니다: {alert_id}")
+        return {"success": False, "message": "알림을 찾을 수 없습니다."} 
+    
+    print(f"[알림 확인 완료] ID: {alert_id} | 완료 시간: {updated_alert.ack_at}")
+
+    return {
+        "success": True,
+        "message": "알림 확인 처리가 완료되었습니다.",
+        "data": updated_alert
+    }
+
+# 현재 시스템에 적용된 모니터링 임계값 및 규칙들을 반환
+def get_alert_rules():
+
+    return {
+        "temp_deviation_threshold_c": 5.0,       # 온도 급변 기준 (5°C)
+        "communication_timeout_sec": 180,        # 통신 타임아웃 기준 (3분)
+        "dedup_window_sec": 300                  # 중복 알림 방지 윈도우 (5분)
+    }
 
 
 

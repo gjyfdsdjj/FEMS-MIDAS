@@ -37,3 +37,20 @@ async def insert_alert(db: AsyncSession, factory_id: int, priority: str, alert_t
         "message": new_alert.message,
         "created_at": new_alert.created_at,
     }
+
+# DB에서 alert_id에 해당하는 알림을 찾아 ack_at 컬럼을 현재 시간으로 업데이트
+async def update_alert_acknowledge(db: AsyncSession, alert_id: int):
+   
+    # 수정할 알림 데이터 하나 가져오기 
+    alert = await db.get(Alert, alert_id)
+
+    if alert is None:
+        return None
+    
+    # 값 변경 
+    alert.ack_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(alert)
+
+    return alert
