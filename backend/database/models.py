@@ -25,6 +25,7 @@ class Alert(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     factory_id = Column(BigInteger)
+    alert_type = Column(String(50), nullable=False)
     priority = Column(String(20), nullable=False, server_default="medium")
     message = Column(Text)
     triggered_at = Column(DateTime(timezone=True))

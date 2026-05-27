@@ -19,3 +19,7 @@
 #
 # - get_alert_rules()
 #     현재 임계값 반환 (temp_deviation_threshold_c / communication_timeout_sec / dedup_window_sec)
+
+from datetime import datetime, timezone, timedelta
+from sqlalchemy.future import select
+from backend.models import Alert
