@@ -1,5 +1,6 @@
 from sqlalchemy import Column, BigInteger, Boolean, Float, Numeric, DateTime, String, Text
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import ENUM
 from .connection import Base
 
 
@@ -19,13 +20,16 @@ class Factory(Base):
     max_quantity = Column(BigInteger)
     is_door_open = Column(Boolean, server_default="false")
 
-
+priority_enum = ENUM("high", "medium", "low", name="alerts_priority", create_type=False)
+severity_enum = ENUM("critical", "warning", "info", name="alerts_severity", create_type=False)
 class Alert(Base):
     __tablename__ = "alerts"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     factory_id = Column(BigInteger)
-    priority = Column(String(20), nullable=False, server_default="medium")
+    alert_type = Column(String(50), nullable=False)
+    priority = Column(priority_enum, nullable=False, server_default="medium")
+    severity = Column(severity_enum, nullable=False, server_default="warning")
     message = Column(Text)
     triggered_at = Column(DateTime(timezone=True))
     ack_at = Column(DateTime(timezone=True))
