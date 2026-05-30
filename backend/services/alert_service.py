@@ -59,7 +59,7 @@ async def send_telegram(message: str):
         logger.error(f"텔레그램 발송 실패: {e}")
 
 # 공장 알림을 생성하고 중복 체크 후 발송하는 함수
-async def create_alert(db: AsyncSession, factory_id: int, priority: str, alert_type: str, message: str):
+async def create_alert(db: AsyncSession, factory_id: int, priority: str, severity: str, alert_type: str, message: str):
     # 300초 전 시간 계산
     time_limit = datetime.now(timezone.utc) - timedelta(seconds=300)
     
@@ -71,11 +71,11 @@ async def create_alert(db: AsyncSession, factory_id: int, priority: str, alert_t
         return None
         
     # 중복이 아니면 DB에 저장 
-    new_alert = await insert_alert(db, factory_id, priority=priority, alert_type=alert_type, message=message)
+    new_alert = await insert_alert(db, factory_id, priority=priority, severity=severity, alert_type=alert_type, message=message)
     
     # 4. CRITICAL / WARNING 이면 send_telegram 호출
-    if priority.lower() in ["critical", "warning"]:
-        telegram_msg = f"⚠️ [{priority.upper()}] 공장 {factory_id}번 알림\n타입: {alert_type}\n내용: {message}"
+    if severity.lower() in ["critical", "warning"]:
+        telegram_msg = f"⚠️ [{severity.upper()}] 공장 {factory_id}번 알림\n타입: {alert_type}\n내용: {message}"
         await send_telegram(telegram_msg)
         
     return new_alert

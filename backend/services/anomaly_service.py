@@ -19,8 +19,9 @@
 #
 
 from datetime import datetime
-from backend.repositories.sensor_log_repository import get_latest_sensor_logs, get_sensor_logs_before_5_minutes
-from backend.repositories.factory_repository import get_factory_last_seen_times
+from repositories.sensor_log_repository import get_latest_sensor_logs, get_sensor_logs_before_5_minutes
+from repositories.factory_repository import get_factory_last_seen_times
+from services.alert_service import create_alert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 TEMP_MIN_C = -22.0
@@ -28,10 +29,11 @@ TEMP_MAX_C = -16.0
 SPIKE_THRESHOLD_C = 5.0
 COMMUNICATION_TIMEOUT_SEC = 180 # 임시 기준: 3분 
 
-def build_anomaly_result(factory_id, level, anomaly_type, message):
+def build_anomaly_result(factory_id, priority, severity, anomaly_type, message):
     return{
         "factory_id": factory_id,
-        "level": level,
+        "priority": priority,   # high, medium, low
+        "severity": severity,   # critical, warning, info
         "alert_type": anomaly_type,
         "message": message
     }
@@ -43,16 +45,18 @@ def check_temperature_range(sensor_log):
     if current_temp < TEMP_MIN_C:
         return build_anomaly_result(
             factory_id,
-            "WARNING",
+            "high",
+            "critical",
             "TEMP_RANGE_OUT",
-            f"{factory_id}번 공장 온도가 너무 낮습니다. 현재 온도: {current_temp}°C"
+            f"⚠️ [CRITICAL] {factory_id}번 공장 온도가 너무 낮습니다. 현재 온도: {current_temp}°C"
         )
     if current_temp > TEMP_MAX_C:
         return build_anomaly_result(
             factory_id,
-            "WARNING",
+            "high",
+            "critical",
             "TEMP_RANGE_OUT",
-            f"{factory_id}번 공장 온도가 너무 높습니다. 현재 온도: {current_temp}°C"
+            f"⚠️ [CRITICAL] {factory_id}번 공장 온도가 너무 높습니다. 현재 온도: {current_temp}°C"
         )
 
     return None
@@ -70,9 +74,10 @@ def check_temperature_spike(current_sensor_log, old_sensor_log):
     if diff >= SPIKE_THRESHOLD_C:
         return build_anomaly_result(
             factory_id,
-            "WARNING",
+            "medium",
+            "warning",
             "TEMP_SPIKE",
-            f"{factory_id}번 공장 온도가 최근 5분 구간 내 급변했습니다. "
+            f"⚠️ [WARNING] {factory_id}번 공장 온도가 최근 5분 구간 내 급변했습니다. "
             f"현재 온도: {current_temp}°C, "
             f"이전 온도: {old_temp}°C, "
             f"변화량: {diff:.2f}°C"
@@ -86,9 +91,10 @@ def check_communication_timeout(factory):
     if last_seen_at is None:
         return build_anomaly_result(
             factory_id,
-            "CRITICAL",
+            "low",
+            "info",
             "COMMUNICATION_TIMEOUT",
-            f"{factory_id}번 공장 센서 수신 시간이 없습니다."
+            f"ℹ️ [INFO] {factory_id}번 공장의 최초 데이터 수신 대기 중입니다."
         )
     
     now = datetime.now(last_seen_at.tzinfo)
@@ -97,9 +103,10 @@ def check_communication_timeout(factory):
     if elapsed_sec >= COMMUNICATION_TIMEOUT_SEC:
         return build_anomaly_result(
             factory_id,
-            "CRITICAL",
+            "high",
+            "critical",
             "COMMUNICATION_TIMEOUT",
-            f"{factory_id}번 공장 센서 데이터가 {int(elapsed_sec)}초 동안 수신되지 않았습니다."
+            f"⚠️ [CRITICAL] {factory_id}번 공장 센서 데이터가 {int(elapsed_sec)}초 동안 수신되지 않았습니다."
         )
     
     return None
@@ -129,20 +136,49 @@ async def run_anomaly_monitoring(db: AsyncSession) -> dict:
     for sensor_log in latest_sensor_logs:
         factory_id = sensor_log["factory_id"]
 
+        # 온도 범위 이탈 체크
         range_result = check_temperature_range(sensor_log)
         if range_result:
             detected_alerts.append(range_result)
+            # db 저장 및 텔레그램 발송 트리거 
+            await create_alert(
+                db=db,
+                factory_id=range_result["factory_id"],
+                priority=range_result["priority"],
+                severity=range_result["severity"],
+                alert_type=range_result["alert_type"],
+                message=range_result["message"]
+            )
 
+        # 온도 급변 체크 
         sensor_log_before_5_minutes = sensor_logs_before_5_minutes_by_factory.get(factory_id)
-
         spike_result = check_temperature_spike(sensor_log, sensor_log_before_5_minutes)
         if spike_result:
             detected_alerts.append(spike_result)
+            # db 저장 및 텔레그램 발송 트리거 
+            await create_alert(
+                db=db,
+                factory_id=spike_result["factory_id"],
+                priority=spike_result["priority"],
+                severity=spike_result["severity"],
+                alert_type=spike_result["alert_type"],
+                message=spike_result["message"]
+            )
     
     for factory_last_seen in factory_last_seen_times:
+        # 통신 타임아웃 감지
         timeout_result = check_communication_timeout(factory_last_seen)
         if timeout_result:
             detected_alerts.append(timeout_result)
+            # db 저장 및 텔레그램 발송 트리거 
+            await create_alert(
+                db=db,
+                factory_id=timeout_result["factory_id"],
+                priority=timeout_result["priority"],
+                severity=timeout_result["severity"],
+                alert_type=timeout_result["alert_type"],
+                message=timeout_result["message"]
+            )
 
     return {
         "success": True,

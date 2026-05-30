@@ -93,7 +93,8 @@ async def issue_readonly_token(
     )
 
     frontend_base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:8501").strip()
-    readonly_url = f"{frontend_base_url}/?token={token}"
+    readonly_url = f"{frontend_base_url}/qr_dash?token={token}"
+    #readonly_url = f"{frontend_base_url}/readonly?token={token}"
     qr_code_base64 = _generate_qr_code_base64(readonly_url)
 
     return {

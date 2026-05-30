@@ -1,5 +1,6 @@
 from datetime import datetime
-from sqlalchemy import select
+from sqlalchemy import select, cast
+from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import Alert
 
@@ -17,10 +18,11 @@ async def check_duplicate_alert(db: AsyncSession, factory_id: int, alert_type: s
     return alert is not None
 
 # 새로운 알림을 DB에 인서트하고 결과를 딕셔너리로 반환
-async def insert_alert(db: AsyncSession, factory_id: int, priority: str, alert_type: str, message: str):
+async def insert_alert(db: AsyncSession, factory_id: int, priority: str, severity: str, alert_type: str, message: str):
     new_alert = Alert(
         factory_id=factory_id,
-        priority=priority,
+        priority=cast(priority, ENUM(name="alerts_priority", create_type=False)),
+        severity=cast(severity, ENUM(name="alerts_severity", create_type=False)),
         alert_type=alert_type,
         message=message
     )
@@ -33,6 +35,7 @@ async def insert_alert(db: AsyncSession, factory_id: int, priority: str, alert_t
         "id": new_alert.id,
         "factory_id": new_alert.factory_id,
         "priority": new_alert.priority,
+        "severity": new_alert.severity,
         "alert_type": new_alert.alert_type,
         "message": new_alert.message,
         "created_at": new_alert.created_at,
