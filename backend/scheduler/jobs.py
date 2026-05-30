@@ -987,12 +987,24 @@ def run_job_b_update_environment_weights() -> dict[str, Any]:
 def run_job_c_monitor_alerts() -> dict[str, Any]:
     """Job C: 1분 주기 이상 감지 및 알림 감시 작업."""
     if anomaly_service is None:
-        return{
+        return {
             "success": False,
             "skipped": True,
             "reason": "ANOMALY_SERVICE_NOT_AVAILABLE"
         }
-    return anomaly_service.run_anomaly_monitoring()
+
+    async def _run():
+        try:
+            from backend.database.connection import AsyncSessionLocal
+        except Exception:
+            from database.connection import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            return await anomaly_service.run_anomaly_monitoring(db)
+
+    result = asyncio.run(_run())
+    print(f"[Job C] 이상 감지 완료: alerts_created={result.get('alerts_created')}, checked_count={result.get('checked_count')}")
+    return result
 
 
 def get_scheduler() -> Any:
