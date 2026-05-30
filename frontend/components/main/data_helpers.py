@@ -89,11 +89,6 @@ def make_equip(factory):
             "s": "warn" if factory["current_schedule_mode"] in ("OFF", "COASTING") else "ok",
         },
         {
-            "n": "PWM",
-            "v": f"{factory['pwm_pct']}%",
-            "s": "err" if factory["pwm_pct"] == 0 and factory["manual_stop"] else "ok",
-        },
-        {
             "n": "재고",
             "v": f"{factory['current_stock_units']}/{factory['capacity_units']}",
             "s": "ok",

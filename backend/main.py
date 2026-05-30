@@ -27,6 +27,10 @@ from routers.operations import router as operations_router
 from routers.sensors import router as sensors_router
 from routers.analytics import router as analytics_router
 from routers.nl_command import router as nl_command_router
+from routers.factories import router as factories_router
+from routers.alerts import router as alerts_router
+from routers.jobs import router as jobs_router
+from routers.schedule import router as schedule_router
 
 app = FastAPI()
 mqtt_subscriber: MQTTSubscriber = None
@@ -47,6 +51,10 @@ app.include_router(operations_router)
 app.include_router(sensors_router)
 app.include_router(analytics_router)
 app.include_router(nl_command_router)
+app.include_router(factories_router)
+app.include_router(alerts_router)
+app.include_router(jobs_router)
+app.include_router(schedule_router)
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -82,6 +90,10 @@ async def startup():
         mqtt_subscriber.start()
     except Exception as e:
         print(f"⚠️ MQTT subscriber 연결 실패 (브로커 없이 계속): {e}")
+
+    # 스케줄러가 DB 저장 시 메인 루프를 사용하도록 참조 전달
+    import scheduler.jobs as _jobs
+    _jobs._MAIN_LOOP = asyncio.get_event_loop()
 
     # 스케줄러 시작 (Job A: 30분 주기 최적화, Job C: 1분 주기 이상 감지)
     scheduler = configure_scheduler_jobs()

@@ -107,23 +107,20 @@ def factory_detail(
 
     sensor_logs = get_sensor_logs(f["factory_id"])
 
-    hdata = [log["temperature_c"] for log in sensor_logs]
-    phdata = [log["humidity_pct"] for log in sensor_logs]
-    pwdata = [log["pwm_pct"] for log in sensor_logs]
+    hdata = [log["temperature_c"] for log in sensor_logs if log.get("temperature_c") is not None]
+    phdata = [log["humidity_pct"] for log in sensor_logs if log.get("humidity_pct") is not None]
 
     if not hdata:
         hdata = [f["temp"]]
     if not phdata:
         phdata = [f["hum"]]
-    if not pwdata:
-        pwdata = [f["power"]]
 
-    stock_pct = round(f["current_stock_units"] / f["capacity_units"] * 100)
+    stock_pct = round(f["current_stock_units"] / f["capacity_units"] * 100) if f.get("capacity_units") else 0
 
     for idx, (col, label, val, unit, sub, clr, spark) in enumerate([
-        (dm1, "현재 온도", f"{f['temp']:.1f}", "°C", f"목표 {f['target']}°C", sc, hdata),
+        (dm1, "현재 온도", f"{f['temp']:.1f}", "°C", f"목표 {round(f['target'], 1)}°C", sc, hdata),
         (dm2, "현재 습도", f"{f['hum']}", "%RH", "기준 60~75%", "#1d9e75", phdata),
-        (dm3, "PWM 출력", f"{f['power']}", "%", "현재 출력", "#ba7517", pwdata),
+        (dm3, "재고", f"{f['current_stock_units']}", "개", f"용량 {f['capacity_units']}개", "#ba7517", hdata),
     ]):
         with col:
             st.markdown(f"""
@@ -262,7 +259,14 @@ def factory_detail(
                     unsafe_allow_html=True
                 )
             else:
-                for alarm in f["alarms"]:
+                show_all_key = f"alarm_show_all_{f['factory_id']}"
+                if show_all_key not in st.session_state:
+                    st.session_state[show_all_key] = False
+
+                alarms = f["alarms"]
+                visible = alarms if st.session_state[show_all_key] else alarms[:5]
+
+                for alarm in visible:
                     lc = "#854f0b" if alarm["level"] == "WARNING" else "#185fa5"
                     lb = "#faeeda" if alarm["level"] == "WARNING" else "#dbeeff"
 
@@ -276,6 +280,14 @@ def factory_detail(
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+
+                if len(alarms) > 5:
+                    if st.session_state[show_all_key]:
+                        if st.button("접기", key=f"alarm_fold_{f['factory_id']}"):
+                            st.session_state[show_all_key] = False
+                    else:
+                        if st.button(f"더보기 ({len(alarms) - 5}개 더)", key=f"alarm_more_{f['factory_id']}"):
+                            st.session_state[show_all_key] = True
 
         with row3_right:
             st.markdown(

@@ -121,6 +121,7 @@ DEFAULT_DUMMY_DATA_PATH = (
 _SCHEDULER: Any | None = None
 _LAST_JOB_A_RESULT: dict[str, Any] | None = None
 _JOB_A_LOGS: list[dict[str, Any]] = []
+_MAIN_LOOP: asyncio.AbstractEventLoop | None = None
 
 
 @dataclass
@@ -940,11 +941,10 @@ def run_job_a_optimization(
 
     if not dry_run and blocks:
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                future = asyncio.run_coroutine_threadsafe(_save_blocks_to_db(blocks), loop)
+            if _MAIN_LOOP is not None:
+                future = asyncio.run_coroutine_threadsafe(_save_blocks_to_db(blocks), _MAIN_LOOP)
                 future.result(timeout=30)
-            except RuntimeError:
+            else:
                 asyncio.run(_save_blocks_to_db(blocks))
             result["db_saved"] = True
         except Exception as e:
