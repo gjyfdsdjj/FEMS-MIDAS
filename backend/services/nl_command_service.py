@@ -34,6 +34,10 @@ _TOOLS = [
                     },
                     "seconds": {"type": "number", "description": "동작 시간(초). START일 때만 사용"},
                     "keep_fan_running": {"type": "boolean", "description": "동작 종료 후 팬 계속 구동 여부"},
+                    "factory_id": {
+                        "type": "integer",
+                        "description": "대상 공장 번호 (1~4). '1번 공장', '공장 2' 등에서 추출. 명시 없으면 생략.",
+                    },
                     "requires_confirmation": {"type": "boolean"},
                     "summary": {"type": "string", "description": "한국어 명령 요약 (UI 표시용)"},
                 },

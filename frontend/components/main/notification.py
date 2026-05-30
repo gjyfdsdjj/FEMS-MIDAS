@@ -1,6 +1,18 @@
 import streamlit as st
 import base64
+import os
+import requests
 from pathlib import Path
+
+_API = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+def _ack_all():
+    try:
+        requests.post(f"{_API}/api/v1/alerts/ack-all", timeout=10)
+    except Exception:
+        pass
+    st.cache_data.clear()
 
 
 def notification_popover(dummy_data, unacked):
@@ -68,18 +80,18 @@ def notification_popover(dummy_data, unacked):
 
     with st.container(key="notification_popover_wrap"):
         with st.popover(""):
-            st.markdown(
-                '<div style="font-size:20px;font-weight:700;color:#1a1a2e;margin-bottom:18px">경보 알림</div>',
-                unsafe_allow_html=True
-            )
+            st.html('<div style="font-size:20px;font-weight:700;color:#1a1a2e;margin-bottom:12px">경보 알림</div>')
 
             all_alerts = dummy_data.get("alerts", [])
+            unacked_ids = [a["alert_id"] for a in all_alerts if not a.get("is_acknowledged")]
+
+            if unacked_ids:
+                if st.button("전체 확인", key="ack_all_btn", use_container_width=True):
+                    _ack_all()
+                    st.rerun()
 
             if not all_alerts:
-                st.markdown(
-                    '<div style="font-size:12px;color:#b4b2a9;padding:8px 0">활성 경보 없음</div>',
-                    unsafe_allow_html=True
-                )
+                st.html('<div style="font-size:12px;color:#b4b2a9;padding:8px 0">활성 경보 없음</div>')
                 return
 
             for a in sorted(all_alerts, key=lambda x: x["is_acknowledged"]):
@@ -114,7 +126,7 @@ def notification_popover(dummy_data, unacked):
                     first_msg = message
                     second_msg = ""
 
-                st.markdown(f"""
+                st.html(f"""
                 <div class="alert-card {card_class}">
                     <div>
                         <div class="alert-title">
@@ -126,7 +138,7 @@ def notification_popover(dummy_data, unacked):
                         </div>
                         <div class="alert-meta">
                             공장 F-{a['factory_id']:02d} &nbsp; | &nbsp;
-                            {a['created_at'][11:16]} &nbsp; | &nbsp;
+                            {a['created_at'][11:16] if a['created_at'] else '--:--'} &nbsp; | &nbsp;
                             {a['level']}
                         </div>
                     </div>
@@ -134,4 +146,4 @@ def notification_popover(dummy_data, unacked):
                         {badge_text}
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                """)

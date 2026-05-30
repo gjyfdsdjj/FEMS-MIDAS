@@ -1,6 +1,26 @@
 # tab4 수동제어
 
 import streamlit as st
+import requests
+import os
+
+_API = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+def _send_to_all(action, payload=None):
+    for fac in st.session_state.get("factories", []):
+        try:
+            requests.post(f"{_API}/api/v1/control/manual", json={
+                "node_id": fac.get("node_id", "nodeA"),
+                "factory_id": fac["factory_id"],
+                "action": action,
+                "allow_high_duty": False,
+                "max_duty": 100.0,
+                "requested_by": "manual",
+                **(payload or {}),
+            }, timeout=5)
+        except Exception:
+            pass
 
 
 def manual_control(log_action):
@@ -87,8 +107,13 @@ def manual_control(log_action):
                             fac["manual_stop"] = True
                             fac["status"] = "err"
                             fac["power"] = 0
+                        _send_to_all("STOP", {"reason": "전체 비상 정지"})
                         log_action("전체 공장 비상 정지")
-                    else:
+                    elif state_key == "force_cool_active":
+                        _send_to_all("SET_TARGET_TEMP", {"value": -19.0, "reason": "강제 냉각"})
+                        log_action(label)
+                    elif state_key == "defrost_heat_active":
+                        _send_to_all("START", {"value": 30.0, "direction": "reverse", "seconds": 300.0, "reason": "제상 히팅"})
                         log_action(label)
 
                 st.rerun()
