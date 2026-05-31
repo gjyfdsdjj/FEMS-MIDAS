@@ -5,9 +5,40 @@ import plotly.graph_objects as go
 import time
 import sys
 import base64
+import requests
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime
 
+API_BASE_URL = "http://localhost:8000"
+
+def issue_qr_token(factory_id):
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/api/v1/readonly/tokens",
+            json={
+                "factory_id": factory_id,
+                "expires_in_minutes": 60
+            },
+            timeout=8
+        )
+
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "message": f"status_code: {response.status_code}",
+                "detail": response.text,
+            }
+
+        return response.json()
+
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "message": "request exception",
+            "detail": str(e),
+        }
+    
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from components.main.factory_detail import factory_detail
@@ -27,6 +58,7 @@ from components.main.data_helpers import (
     get_door_events,
     make_equip,
 )
+
 
 st.set_page_config(
     page_title="MIDAS FEMS 대시보드",
@@ -50,6 +82,110 @@ def load_dummy_data():
         return json5.load(f)
 
 dummy_data = load_dummy_data()
+
+
+def api_get(path: str, params: dict = None) -> dict | None:
+    try:
+        resp = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=30)
+def fetch_factories() -> list[dict]:
+    result = api_get("/api/v1/factories")
+    if result and result.get("success"):
+        return result["data"]
+    return []
+
+
+@st.cache_data(ttl=30)
+def fetch_alerts() -> list[dict]:
+    result = api_get("/api/v1/alerts", {"limit": 100})
+    if result and result.get("success"):
+        return result["data"]
+    return []
+
+
+@st.cache_data(ttl=30)
+def fetch_schedules() -> list[dict]:
+    result = api_get("/api/v1/schedules")
+    if result and result.get("success"):
+        return result["data"]
+    return []
+
+
+@st.cache_data(ttl=5)
+def fetch_live_sensors() -> list[dict]:
+    result = api_get("/api/v1/sensors/live")
+    if result and result.get("success"):
+        return result["data"]
+    return []
+
+
+@st.cache_data(ttl=30)
+def fetch_sensor_history_full(factory_id: int) -> list[dict]:
+    """detail view용 — factory_id별 sensor_logs 형식 반환"""
+    result = api_get("/api/v1/sensors/history", {"factory_id": factory_id, "metric": "temperature", "interval": "1m"})
+    if not result or not result.get("data"):
+        return []
+    rows = []
+    for p in result["data"]:
+        rows.append({
+            "factory_id": factory_id,
+            "temperature_c": p["value"],
+            "humidity_pct": None,
+            "timestamp": p["timestamp"],
+            "communication_status": "OK",
+        })
+    return rows
+
+
+@st.cache_data(ttl=30)
+def fetch_sensor_history(factory_id: int) -> list[float]:
+    result = api_get("/api/v1/sensors/history", {"factory_id": factory_id, "metric": "temperature", "interval": "1m"})
+    if result and result.get("data"):
+        return [p["value"] for p in result["data"][-20:]]
+    return []
+
+
+@st.cache_data(ttl=120)
+def fetch_temp_predict(factory_id: int) -> dict | None:
+    result = api_get(f"/api/v1/analytics/temperature-predict/{factory_id}")
+    return result if result and result.get("predicted_temp") is not None else None
+
+
+@st.cache_data(ttl=120)
+def fetch_maintenance(factory_id: int) -> dict | None:
+    result = api_get(f"/api/v1/operations/maintenance/{factory_id}")
+    return result if result else None
+
+
+@st.cache_data(ttl=30)
+def fetch_jobs() -> list[dict]:
+    result = api_get("/api/v1/jobs")
+    if result and result.get("success"):
+        return result["data"]
+    return []
+
+
+@st.cache_data(ttl=10800)
+def fetch_weather() -> dict | None:
+    result = api_get("/api/v1/weather/tomorrow")
+    if not result or not result.get("forecasts"):
+        return None
+    forecasts = result["forecasts"]
+    max_temp = max((f["temperature_c"] for f in forecasts), default=None)
+    weather_strs = [f.get("weather", "") for f in forecasts]
+    if any("비" in w or "소나기" in w for w in weather_strs):
+        condition = "RAINY"
+    elif any("흐림" in w or "구름" in w for w in weather_strs):
+        condition = "CLOUDY"
+    else:
+        condition = "CLEAR"
+    return {"weather_condition": condition, "max_temp_forecast_c": max_temp}
 
 
 def status_color(s):
@@ -83,6 +219,173 @@ def log_action(action):
     st.session_state.ctrl_log.insert(0, f"{ts}  {action}")
 
 
+# API 데이터로 dummy_data 갱신 (UI 코드 변경 없이 실데이터 사용)
+def _merge_api_data():
+    _fids = [f["factory_id"] for f in dummy_data.get("factories", [])] or [1, 2, 3, 4]
+
+    with ThreadPoolExecutor(max_workers=5 + len(_fids) * 2 + 1) as ex:
+        f_future = ex.submit(fetch_factories)
+        a_future = ex.submit(fetch_alerts)
+        s_future = ex.submit(fetch_schedules)
+        w_future = ex.submit(fetch_weather)
+        l_future = ex.submit(fetch_live_sensors)
+        j_future = ex.submit(fetch_jobs)
+        tp_futures = {fid: ex.submit(fetch_temp_predict, fid) for fid in _fids}
+        mt_futures = {fid: ex.submit(fetch_maintenance, fid) for fid in _fids}
+
+        api_factories = f_future.result()
+        api_alerts_data = a_future.result()
+        api_schedules_data = s_future.result()
+        api_weather = w_future.result()
+        api_live = l_future.result()
+        api_jobs = j_future.result()
+        api_temp_predict = {fid: fut.result() for fid, fut in tp_futures.items()}
+        api_maintenance = {fid: fut.result() for fid, fut in mt_futures.items()}
+
+    # 보조 인덱스
+    live_by_id = {s["factory_id"]: s for s in api_live}
+    from datetime import timezone as _tz
+    now_str = datetime.now(_tz.utc).isoformat()
+    active_mode_by_id = {}
+    for s in api_schedules_data:
+        fid = s["factory_id"]
+        start = s.get("start_at", "")
+        end = s.get("end_at", "") or ""
+        if start <= now_str and (not end or end >= now_str):
+            active_mode_by_id[fid] = s.get("mode", "OFF")
+
+    # factories
+    if api_factories:
+        merged = []
+        dummy_by_id = {f["factory_id"]: f for f in dummy_data.get("factories", [])}
+        for f in api_factories:
+            fid = f["factory_id"]
+            base = dict(dummy_by_id.get(fid, {}))
+            live = live_by_id.get(fid, {})
+            base.update({
+                "factory_id": fid,
+                "name": f.get("name", base.get("name")),
+                "status": f.get("status", base.get("status", "stopped")),
+                "temperature_c": f.get("current_temp", base.get("temperature_c")),
+                "humidity_pct": f.get("current_humidity", base.get("humidity_pct")),
+                "last_seen_at": f.get("last_seen_at"),
+                "target_temp_c": f["target_temp_c"] if f.get("target_temp_c") is not None else base.get("target_temp_c", -18.0),
+                "manual_stop": f["manual_stop"] if f.get("manual_stop") is not None else base.get("manual_stop", False),
+                "current_stock_units": f["current_stock_units"] if f.get("current_stock_units") is not None else base.get("current_stock_units", 0),
+                "capacity_units": f["max_quantity"] if f.get("max_quantity") is not None else base.get("capacity_units", 0),
+                "control_mode": f["control_mode"] if f.get("control_mode") is not None else base.get("control_mode", "AUTO"),
+                "node_id": f["node_id"] if f.get("node_id") is not None else (live.get("node_id") or base.get("node_id", "-")),
+                "communication_status": live.get("communication", base.get("communication_status", "UNKNOWN")),
+                "current_schedule_mode": active_mode_by_id.get(fid, base.get("current_schedule_mode", "OFF")),
+            })
+            merged.append(base)
+        dummy_data["factories"] = merged
+
+    # alerts
+    if api_alerts_data:
+        dummy_data["alerts"] = [
+            {
+                "alert_id": a["id"],
+                "factory_id": a["factory_id"],
+                "level": {"high": "ERROR", "medium": "WARNING", "low": "INFO"}.get(
+                    (a.get("priority") or "low").lower(), "INFO"
+                ),
+                "type": "TEMP_DEVIATION",
+                "message": a.get("message", ""),
+                "created_at": a.get("triggered_at") or a.get("created_at"),
+                "is_acknowledged": a.get("is_acknowledged", False),
+                "acknowledged_by": None,
+            }
+            for a in api_alerts_data
+        ]
+
+    # schedules
+    if api_schedules_data:
+        dummy_data["schedules"] = [
+            {
+                "schedule_id": s["id"],
+                "factory_id": s["factory_id"],
+                "target_temp_c": s.get("target_temp"),
+                "mode": s.get("mode"),
+                "start_at": s.get("start_at"),
+                "end_at": s.get("end_at"),
+            }
+            for s in api_schedules_data
+        ]
+
+    # weather → environment_weights 갱신
+    if api_weather:
+        ew = dummy_data.get("environment_weights", {})
+        ew["weather_condition"] = api_weather["weather_condition"]
+        if api_weather["max_temp_forecast_c"] is not None:
+            ew["max_temp_forecast_c"] = api_weather["max_temp_forecast_c"]
+        from datetime import datetime as _dt
+        ew["updated_at"] = _dt.now().strftime("%Y-%m-%dT%H:%M")
+        dummy_data["environment_weights"] = ew
+
+    # sensor_logs → history 데이터로 교체 (공장별 병렬 조회)
+    factory_ids = [f["factory_id"] for f in dummy_data.get("factories", [])]
+    if factory_ids:
+        with ThreadPoolExecutor(max_workers=len(factory_ids)) as ex:
+            hist_futures = {fid: ex.submit(fetch_sensor_history_full, fid) for fid in factory_ids}
+            all_history = []
+            for fid, fut in hist_futures.items():
+                all_history.extend(fut.result())
+        if all_history:
+            dummy_data["sensor_logs"] = all_history
+
+    # predict_temperature
+    tp_list = []
+    for fid, data in api_temp_predict.items():
+        if data:
+            tp_list.append({
+                "factory_id": fid,
+                "predicted_temp": data.get("predicted_temp"),
+                "current_temp": data.get("current_temp"),
+                "trend": data.get("trend", "안정"),
+                "horizon_minutes": data.get("horizon_minutes", 60),
+            })
+    if tp_list:
+        dummy_data["predict_temperature"] = tp_list
+
+    # predict_maintenance
+    mt_list = []
+    for fid, data in api_maintenance.items():
+        if data:
+            rec = data.get("recommendation", "UNKNOWN")
+            risk = "LOW" if rec == "NORMAL" else "HIGH" if rec == "MAINTENANCE_REQUIRED" else "MEDIUM"
+            mpd = data.get("minutes_per_degree")
+            health = round(max(0.0, min(1.0, 1.0 - (mpd - 10) / 20)), 2) if mpd else 1.0
+            mt_list.append({
+                "factory_id": fid,
+                "health_score": health,
+                "maintenance_risk": risk,
+                "reason": data.get("message", ""),
+                "recommended_action": "이상 없음" if rec == "NORMAL" else "설비 점검 권고",
+            })
+    if mt_list:
+        dummy_data["predict_maintenance"] = mt_list
+
+    # jobs
+    if api_jobs:
+        dummy_data["jobs"] = [
+            {
+                "job_id": j["id"],
+                "factory_id": j.get("factory_id"),
+                "is_active": j.get("status") in ("pending", "in_progress"),
+                "target_units": j.get("quantity") or 0,
+                "produced_units": j.get("produced_units") or 0,
+                "remaining_units": j.get("remaining_units") or 0,
+                "progress_rate": j.get("progress_rate") or 0.0,
+                "deadline_at": j.get("deadline_at"),
+                "status": j.get("status"),
+                "strategy": "BALANCED",
+            }
+            for j in api_jobs
+        ]
+
+_merge_api_data()
+
 # 데이터
 FACTORIES = [
     {
@@ -91,7 +394,7 @@ FACTORIES = [
         "name": f["name"],
         "temp": f["temperature_c"],
         "hum": f["humidity_pct"],
-        "power": f["pwm_pct"],
+        "power": 0,
         "status": convert_status(f["status"]),
         "raw_status": f["status"],
         "target": f["target_temp_c"],
@@ -110,10 +413,7 @@ FACTORIES = [
 # 세션 초기화
 def init_state():
     defaults = {
-        "ctrl_log": [
-            control_log_text(log)
-            for log in dummy_data.get("control_logs", [])
-        ],
+        "ctrl_log": [],
         "emergency": False,
         "factories": [dict(f) for f in FACTORIES],
         "power_kw": 847.0,
@@ -127,14 +427,15 @@ def init_state():
 init_state()
 
 
-# 실시간 시뮬레이션
-now_t = time.time()
-if now_t - st.session_state.last_tick > 3:
-    st.session_state.power_kw = max(700, min(1050, st.session_state.power_kw + random.uniform(-8, 8)))
-    st.session_state.solar_kw = max(180, min(360,  st.session_state.solar_kw + random.uniform(-3, 3)))
-    for f in st.session_state.factories:
-        f["temp"] = round(f["temp"] + random.uniform(-0.2, 0.2), 1)
-    st.session_state.last_tick = now_t
+# 실시간 센서 갱신 (5초 캐시 기반, 데이터 없으면 기존값 유지)
+_live = {s["factory_id"]: s for s in fetch_live_sensors()}
+for f in st.session_state.factories:
+    live = _live.get(f["factory_id"])
+    if live:
+        if live.get("temperature_c") is not None:
+            f["temp"] = live["temperature_c"]
+        if live.get("humidity_pct") is not None:
+            f["hum"] = live["humidity_pct"]
 
 
 # 차트 함수
@@ -151,7 +452,9 @@ def sparkline_fig(data, color, height=50):
 
 def temp_trend_fig(f, n=20):
     base = f["temp"]
-    data = [round(base + random.uniform(-0.8, 0.8), 1) for _ in range(n-1)] + [base]
+    history = fetch_sensor_history(f["factory_id"])
+    data = history if len(history) >= 2 else ([base] * n)
+    n = len(data)
     clr  = bar_color(base, f["target"])
     fig  = go.Figure()
     fig.add_trace(go.Scatter(y=[f["target"]]*n, mode="lines",
@@ -162,7 +465,7 @@ def temp_trend_fig(f, n=20):
         fill="tozeroy", fillcolor=hex_to_rgba(clr, 0.08), showlegend=False))
     fig.update_layout(margin=dict(l=40,r=10,t=10,b=20), height=120,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(tickvals=[0,n-1], ticktext=["1시간 전","현재"],
+        xaxis=dict(tickvals=[0, max(0, n-1)], ticktext=["1시간 전","현재"],
                    tickfont=dict(size=10,color="#b4b2a9"), gridcolor="rgba(0,0,0,0)"),
         yaxis=dict(tickfont=dict(size=10,color="#888780"), gridcolor="#f1efe8"))
     return fig
@@ -423,8 +726,23 @@ with main_col:
                 sparkline_fig,
                 temp_predict_fig,
                 temp_trend_fig,
+                issue_qr_token,
             ),
             log_action,
+            lambda node_id, factory_id, action, payload: requests.post(
+                f"{API_BASE_URL}/api/v1/control/manual",
+                json={
+                    "node_id": node_id,
+                    "factory_id": factory_id,
+                    "action": action,
+                    "reason": payload.get("reason", ""),
+                    "allow_high_duty": False,
+                    "max_duty": 100.0,
+                    "requested_by": "manual",
+                    **{k: v for k, v in payload.items() if k != "reason"},
+                },
+                timeout=5,
+            ),
         )
 
     # 에너지 비용
@@ -441,11 +759,134 @@ with main_col:
         
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-# 챗봇
+# 플로팅 마이크 버튼
 mic_path = Path(__file__).resolve().parents[1] / "assets" / "mic.png"
+mic_b64 = base64.b64encode(mic_path.read_bytes()).decode()
 
 st.markdown(f"""
-<a class="floating-chat-btn" href="#">
-    <img src="data:image/png;base64,{base64.b64encode(mic_path.read_bytes()).decode()}" />
-</a>
+<style>
+.st-key-floating_mic_btn {{
+    position: fixed;
+    bottom: 32px;
+    right: 32px;
+    z-index: 9999;
+}}
+.st-key-floating_mic_btn button {{
+    width: 56px !important;
+    height: 56px !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18) !important;
+    padding: 0 !important;
+    cursor: pointer !important;
+    background-image: url("data:image/png;base64,{mic_b64}") !important;
+    background-size: 60% !important;
+    background-repeat: no-repeat !important;
+    background-position: center !important;
+    background-color: white !important;
+}}
+.st-key-floating_mic_btn button p {{ display: none !important; }}
+</style>
 """, unsafe_allow_html=True)
+
+if st.button(" ", key="floating_mic_btn"):
+    st.session_state["voice_dialog_open"] = True
+
+@st.dialog("음성 제어")
+def voice_dialog():
+    mic_tab, text_tab = st.tabs(["마이크 입력", "텍스트 입력"])
+
+    with mic_tab:
+        audio = st.audio_input("마이크 버튼을 눌러 명령을 말하세요")
+        if audio and st.button("분석", key="dlg_analyze_audio"):
+            with st.spinner("음성 인식 중..."):
+                try:
+                    resp = requests.post(
+                        f"{API_BASE_URL}/api/v1/nl-command/parse-audio",
+                        files={"file": (audio.name, audio.getvalue(), audio.type)},
+                        timeout=60.0,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    st.session_state["nl_transcript"] = data["transcript"]
+                    st.session_state["nl_pending_command"] = data["command"]
+                except Exception as exc:
+                    st.error(str(exc))
+
+    with text_tab:
+        nl_text = st.text_area("명령을 입력하세요", placeholder="1번 공장 목표온도 -20도로 설정해줘")
+        if st.button("분석", key="dlg_analyze_text"):
+            with st.spinner("분석 중..."):
+                try:
+                    resp = requests.post(
+                        f"{API_BASE_URL}/api/v1/nl-command/parse-text",
+                        json={"text": nl_text},
+                        timeout=15.0,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    st.session_state["nl_transcript"] = data["transcript"]
+                    st.session_state["nl_pending_command"] = data["command"]
+                except Exception as exc:
+                    st.error(str(exc))
+
+    if st.session_state.get("nl_pending_command"):
+        cmd = st.session_state["nl_pending_command"]
+        st.info(f"인식된 명령: {st.session_state.get('nl_transcript', '')}")
+        st.caption(cmd.get("summary", ""))
+        st.json(cmd)
+
+        factory_options = {f["factory_id"]: f["name"] for f in st.session_state.get("factories", [])}
+        if not factory_options:
+            factory_options = {1: "공장 1", 2: "공장 2", 3: "공장 3", 4: "공장 4"}
+
+        llm_fid = cmd.get("factory_id")
+        default_fid = llm_fid if llm_fid in factory_options else list(factory_options.keys())[0]
+        selected_fid = st.selectbox(
+            "대상 공장",
+            options=list(factory_options.keys()),
+            format_func=lambda x: f"{x}번 - {factory_options[x]}",
+            index=list(factory_options.keys()).index(default_fid),
+        )
+
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("실행하기", use_container_width=True, type="primary"):
+                nl_body = {
+                    "node_id": "nodeA",
+                    "factory_id": selected_fid,
+                    "action": cmd["action"],
+                    "reason": f"음성 명령: {cmd.get('summary', '')}",
+                    "allow_high_duty": False,
+                    "max_duty": 100.0,
+                    "requested_by": "voice",
+                }
+                if cmd.get("value") is not None:
+                    nl_body["value"] = cmd["value"]
+                if cmd.get("direction"):
+                    nl_body["direction"] = cmd["direction"]
+                if cmd.get("seconds") is not None:
+                    nl_body["seconds"] = cmd["seconds"]
+                if cmd.get("fan_cooldown_sec") is not None:
+                    nl_body["fan_cooldown_seconds"] = cmd["fan_cooldown_sec"]
+                try:
+                    requests.post(f"{API_BASE_URL}/api/v1/control/manual", json=nl_body, timeout=5)
+                    st.session_state["nl_pending_command"] = None
+                    st.session_state["nl_show_success"] = True
+                except Exception as exc:
+                    st.error(str(exc))
+        with cancel_col:
+            if st.button("취소", use_container_width=True):
+                st.session_state["nl_pending_command"] = None
+
+    if st.session_state.get("nl_show_success"):
+        st.success("명령 전송 완료")
+        st.session_state["nl_show_success"] = False
+        import time as _time
+        _time.sleep(2)
+        st.rerun()
+
+if st.session_state.get("voice_dialog_open"):
+    st.session_state["voice_dialog_open"] = False
+    voice_dialog()

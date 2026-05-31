@@ -1,10 +1,13 @@
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from database.connection import get_db
 from mqtt.publisher import publisher
 from mqtt.status_store import status_store
+from services.control_service import log_control_action
 
 
 router = APIRouter(prefix="/api/v1/control", tags=["control"])
@@ -27,6 +30,7 @@ class ManualControlRequest(BaseModel):
     fan_spinup_seconds: Optional[float] = None
     fan_cooldown_seconds: Optional[float] = None
     reason: Optional[str] = ""
+    requested_by: Optional[str] = "manual"
 
 
 class AllStopRequest(BaseModel):
@@ -35,7 +39,7 @@ class AllStopRequest(BaseModel):
 
 
 @router.post("/manual")
-async def manual_control(req: ManualControlRequest):
+async def manual_control(req: ManualControlRequest, db: AsyncSession = Depends(get_db)):
     action = req.action.upper()
     if action not in ALLOWED_ACTIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {req.action}")
@@ -98,6 +102,21 @@ async def manual_control(req: ManualControlRequest):
         payload["reason"] = req.reason
 
     command = publisher.publish_command(node_id, req.factory_id, action, payload)
+
+    try:
+        await log_control_action(
+            db,
+            factory_id=req.factory_id,
+            node_id=node_id,
+            action=action,
+            value=req.value,
+            reason=req.reason or None,
+            requested_by=req.requested_by or "manual",
+            result=command["command_id"],
+        )
+    except Exception as e:
+        print(f"[control_log] 저장 실패: {e}")
+
     return {
         "success": True,
         "message": f"{action} command published",

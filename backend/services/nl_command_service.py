@@ -17,19 +17,27 @@ _TOOLS = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "제어 명령. START, STOP, SET_PWM, SET_TARGET_TEMP, FAN_ON, FAN_OFF 중 하나",
+                        "enum": ["START", "SET_TARGET_TEMP"],
+                        "description": (
+                            "START: duty(%)와 방향을 지정해 일정 시간 동작. "
+                            "SET_TARGET_TEMP: 목표 온도(°C)까지 자동 냉각."
+                        ),
                     },
                     "value": {
                         "type": "number",
-                        "description": "START/SET_PWM이면 duty(0~100%), SET_TARGET_TEMP이면 목표온도(°C)",
+                        "description": "START이면 duty(0~100%), SET_TARGET_TEMP이면 목표온도(°C)",
                     },
                     "direction": {
                         "type": "string",
-                        "description": "forward(냉각) 또는 reverse(가열)",
+                        "enum": ["forward", "reverse"],
+                        "description": "forward(냉각) 또는 reverse(가열). START일 때만 사용",
                     },
-                    "seconds": {"type": "number", "description": "동작 시간(초)"},
-                    "fan_cooldown_sec": {"type": "number", "description": "정지 후 팬 냉각 유지 시간(초)"},
-                    "keep_fan_running": {"type": "boolean"},
+                    "seconds": {"type": "number", "description": "동작 시간(초). START일 때만 사용"},
+                    "keep_fan_running": {"type": "boolean", "description": "동작 종료 후 팬 계속 구동 여부"},
+                    "factory_id": {
+                        "type": "integer",
+                        "description": "대상 공장 번호 (1~4). '1번 공장', '공장 2' 등에서 추출. 명시 없으면 생략.",
+                    },
                     "requires_confirmation": {"type": "boolean"},
                     "summary": {"type": "string", "description": "한국어 명령 요약 (UI 표시용)"},
                 },
@@ -41,7 +49,9 @@ _TOOLS = [
 
 _SYSTEM = (
     "당신은 냉장 공장 펠티어 제어 시스템의 명령 해석기입니다. "
-    "사용자의 자연어를 제어 명령으로 변환하세요. "
+    "사용자의 자연어를 START 또는 SET_TARGET_TEMP 명령으로 변환하세요. "
+    "START: duty(value), direction(forward=냉각/reverse=가열), seconds, keep_fan_running을 설정합니다. "
+    "SET_TARGET_TEMP: value에 목표 온도(°C)를 설정합니다. "
     "requires_confirmation은 항상 true로 설정하세요. "
     "명시되지 않은 파라미터는 생략하세요."
 )

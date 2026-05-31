@@ -1,6 +1,18 @@
 # tab3 운영 관리
 
 import streamlit as st
+from datetime import datetime, timezone, timedelta
+
+
+def _fmt_deadline(deadline_at: str) -> str:
+    if not deadline_at:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(deadline_at.replace("Z", "+00:00"))
+        kst = dt.astimezone(timezone(timedelta(hours=9)))
+        return kst.strftime("%m/%d %H:%M")
+    except Exception:
+        return deadline_at[:16].replace("T", " ")
 
 
 def operation_manage(dummy_data, schedule_fig):
@@ -11,7 +23,7 @@ def operation_manage(dummy_data, schedule_fig):
             '<div class="card-title">작업 현황 및 분배 계획</div>',
             unsafe_allow_html=True
         )
-        st.markdown(job_status_html(dummy_data), unsafe_allow_html=True)
+        st.html(job_status_html(dummy_data))
 
     with oc2:
         st.markdown(
@@ -49,7 +61,7 @@ def operation_manage(dummy_data, schedule_fig):
             est_m = round(sch.get("estimated_monthly_saving_krw", 0) / 10000)
             comp = sch.get("computed_at", "")[:16].replace("T", " ")
 
-            st.markdown(f"""
+            st.html(f"""
             <div style="margin-top:12px;padding:10px 14px;
                 background:#eaf3de;border-radius:8px;border:0.5px solid #c6dba0">
               <div style="font-size:12px;font-weight:500;color:#3b6d11;margin-bottom:6px">
@@ -65,7 +77,7 @@ def operation_manage(dummy_data, schedule_fig):
                 <span style="font-size:12px;color:#888780">계산: {comp}</span>
               </div>
             </div>
-            """, unsafe_allow_html=True)
+            """)
 
 
 def job_status_html(dummy_data):
@@ -74,49 +86,29 @@ def job_status_html(dummy_data):
     if not jobs:
         return '<div style="font-size:12px;color:#b4b2a9">진행 중인 작업 없음</div>'
 
-    job = jobs[0]
-    pct = job["progress_rate"] * 100
-    deadline = job["deadline_at"][11:16]
-
     strategy_map = {
         "COST_MIN": "비용 최소",
         "SAFETY_FIRST": "안전 우선",
         "BALANCED": "균형",
     }
 
-    strat = strategy_map.get(job["strategy"], job["strategy"])
-    bar_clr = "#378add" if pct < 80 else ("#ba7517" if pct < 100 else "#1d9e75")
-
     prod_allocs = dummy_data.get("production_allocations", [])
     ship_allocs = dummy_data.get("shipment_allocations", [])
 
-    alloc_rows = []
+    cards = []
+    for job in reversed(jobs):
+        pct = (job.get("progress_rate") or 0) * 100
+        deadline = _fmt_deadline(job.get("deadline_at", ""))
+        strat = strategy_map.get(job.get("strategy", "BALANCED"), job.get("strategy", "BALANCED"))
+        bar_clr = "#378add" if pct < 80 else ("#ba7517" if pct < 100 else "#1d9e75")
 
-    for fid in [1, 2, 3, 4]:
-        pa = next((p for p in prod_allocs if p["factory_id"] == fid), None)
-        sa = next((s for s in ship_allocs if s["factory_id"] == fid), None)
-
-        inbound = pa["planned_inbound_units_until_deadline"] if pa else 0
-        shipment = sa["planned_shipment_units_until_deadline"] if sa else 0
-        excluded = pa and pa.get("source") == "MANUAL_STOP_EXCLUDE"
-        row_bg = "#f8f5f0" if excluded else "transparent"
-
-        alloc_rows.append(
-            f'<tr style="background:{row_bg}">'
-            f'<td style="padding:4px 8px;font-size:12px;color:#444441">공장 {fid}</td>'
-            f'<td style="padding:4px 8px;font-size:12px;color:#378add;text-align:right">{inbound}개</td>'
-            f'<td style="padding:4px 8px;font-size:12px;color:#ba7517;text-align:right">{shipment}개</td>'
-            f'<td style="padding:4px 8px;font-size:11px;color:#b4b2a9">{"정지 제외" if excluded else ""}</td>'
-            f'</tr>'
-        )
-
-    return f"""
-    <div>
+        cards.append(f"""
+    <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:0.5px solid #e0e3ea">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
         <div>
           <div style="font-size:13px;font-weight:500;color:#1a1a2e">{job['job_id']}</div>
           <div style="font-size:12px;color:#888780;margin-top:2px">
-            마감 {deadline} · 전략: {strat}
+            마감 {deadline} (KST) · 전략: {strat}
           </div>
         </div>
         <div style="text-align:right">
@@ -127,19 +119,40 @@ def job_status_html(dummy_data):
           <div style="font-size:12px;color:#888780">잔여 {job['remaining_units']}개</div>
         </div>
       </div>
-
       <div style="height:11px;background:#f1efe8;border-radius:5px;overflow:hidden;margin-bottom:4px">
         <div style="height:10px;width:{pct:.1f}%;background:{bar_clr};border-radius:5px;transition:width .3s"></div>
       </div>
-
-      <div style="font-size:11px;color:{bar_clr};text-align:right;margin-bottom:14px">
+      <div style="font-size:11px;color:{bar_clr};text-align:right;margin-bottom:4px">
         {pct:.0f}% 완료
       </div>
+    </div>
+    """)
 
-      <div style="font-size:13px;font-weight:500;color:#888780;margin-bottom:6px">
-        공장별 입고 / 출고 분배
-      </div>
+    # 공장별 입고/출고 분배 통합 테이블
+    all_fids = sorted({job.get("factory_id") for job in jobs if job.get("factory_id")})
+    if not all_fids:
+        all_fids = [1, 2, 3, 4]
 
+    alloc_rows = []
+    for fid in all_fids:
+        pa = next((p for p in prod_allocs if p["factory_id"] == fid), None)
+        sa = next((s for s in ship_allocs if s["factory_id"] == fid), None)
+        inbound = pa["planned_inbound_units_until_deadline"] if pa else 0
+        shipment = sa["planned_shipment_units_until_deadline"] if sa else 0
+        excluded = pa and pa.get("source") == "MANUAL_STOP_EXCLUDE"
+        row_bg = "#f8f5f0" if excluded else "transparent"
+        alloc_rows.append(
+            f'<tr style="background:{row_bg}">'
+            f'<td style="padding:4px 8px;font-size:12px;color:#444441">공장 {fid}</td>'
+            f'<td style="padding:4px 8px;font-size:12px;color:#378add;text-align:right">{inbound}개</td>'
+            f'<td style="padding:4px 8px;font-size:12px;color:#ba7517;text-align:right">{shipment}개</td>'
+            f'<td style="padding:4px 8px;font-size:11px;color:#b4b2a9">{"정지 제외" if excluded else ""}</td>'
+            f'</tr>'
+        )
+
+    alloc_table = f"""
+    <div style="margin-top:4px">
+      <div style="font-size:13px;font-weight:500;color:#888780;margin-bottom:6px">공장별 입고 / 출고 분배</div>
       <table style="width:100%;border-collapse:collapse;border:0.5px solid #e0e3ea;border-radius:6px;overflow:hidden">
         <thead style="background:#f8f8f6">
           <tr>
@@ -149,9 +162,9 @@ def job_status_html(dummy_data):
             <th style="font-size:12px;color:#888780;font-weight:500;padding:5px 8px">비고</th>
           </tr>
         </thead>
-        <tbody>
-          {''.join(alloc_rows)}
-        </tbody>
+        <tbody>{''.join(alloc_rows)}</tbody>
       </table>
     </div>
     """
+
+    return f'<div>{"".join(cards)}{alloc_table}</div>'

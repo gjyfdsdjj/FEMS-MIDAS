@@ -1,5 +1,6 @@
 from sqlalchemy import Column, BigInteger, Boolean, Float, Numeric, DateTime, String, Text
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import ENUM
 from .connection import Base
 
 
@@ -18,14 +19,22 @@ class Factory(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     max_quantity = Column(BigInteger)
     is_door_open = Column(Boolean, server_default="false")
+    node_id = Column(String(20))
+    manual_stop = Column(Boolean, server_default="false")
+    target_temp_c = Column(Float)
+    current_stock_units = Column(BigInteger)
+    control_mode = Column(String(20), server_default="AUTO")
 
-
+priority_enum = ENUM("high", "medium", "low", name="alerts_priority", create_type=False)
+severity_enum = ENUM("critical", "warning", "info", name="alerts_severity", create_type=False)
 class Alert(Base):
     __tablename__ = "alerts"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     factory_id = Column(BigInteger)
-    priority = Column(String(20), nullable=False, server_default="medium")
+    alert_type = Column(String(50), nullable=False)
+    priority = Column(priority_enum, nullable=False, server_default="medium")
+    severity = Column(severity_enum, nullable=False, server_default="warning")
     message = Column(Text)
     triggered_at = Column(DateTime(timezone=True))
     ack_at = Column(DateTime(timezone=True))
@@ -48,12 +57,15 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    factory_id = Column(BigInteger)
+    factory_id = Column(BigInteger, nullable=False)
     target_units = Column(Text)
     status = Column(String(20), nullable=False, server_default="pending")
     deadline_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     quantity = Column(BigInteger)
+    produced_units = Column(BigInteger, server_default="0")
+    dynamic_scheduling_enabled = Column(Boolean, server_default="true")
+    daily_shipment_hour = Column(BigInteger, server_default="6")
 
 
 class PowerLog(Base):
@@ -65,6 +77,20 @@ class PowerLog(Base):
     power_w = Column(Float, nullable=False)       # 실측 전력 (W)
     measured_at = Column(DateTime(timezone=True))
     logged_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class ControlLog(Base):
+    __tablename__ = "control_logs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    factory_id = Column(BigInteger, nullable=False)
+    node_id = Column(String(20))
+    action = Column(String(30), nullable=False)
+    value = Column(Float)
+    reason = Column(Text)
+    requested_by = Column(String(50), server_default="streamlit")
+    result = Column(Text)
+    issued_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class SensorLog(Base):

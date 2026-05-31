@@ -2,6 +2,40 @@
   background-color: #f5f6f8;
 }
 
+/*
+html,
+body,
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"],
+[data-testid="stToolbar"] {
+  background-color: #f5f6f8 !important;
+  color: #1a1a2e !important;
+  color-scheme: light !important;
+}
+
+.stApp p,
+.stApp span,
+.stApp div,
+.stApp label {
+  color-scheme: light !important;
+}
+
+[data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"] {
+  color-scheme: light !important;
+}
+
+div[data-baseweb="popover"],
+div[data-baseweb="popover"] > div,
+section[data-testid="stPopoverContent"],
+div[data-testid="stPopoverContent"] {
+  background-color: #ffffff !important;
+  color: #1a1a2e !important;
+  color-scheme: light !important;
+}
+
+*/
 [data-testid="collapsedControl"] {
   display: none;
 }
@@ -312,6 +346,32 @@
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-bottom: 8px;
+}
+/* QR 코드 */
+.qr-issue-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+
+  width: 88px;
+  height: 34px;
+
+  background: #1d9e75;
+  color: white;
+
+  border: none;
+  border-radius: 8px;
+
+  font-size: 13px;
+  font-weight: 500;
+
+  cursor: pointer;
+}
+.qr-issue-btn img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
 }
 
 /* 탭 - 기본, 공장 상세 */
