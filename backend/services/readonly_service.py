@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # backend/services/readonly_service.py
 # QR 읽기 전용 토큰 발급 및 조회 로직
 #
