@@ -1,5 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from repositories.sensor_log_archive_repository import get_recent_archive_sensor_logs
+from datetime import datetime, timedelta, timezone
+from repositories.alert_repository import check_duplicate_alert, insert_alert
+
 import rrcf
 
 RCF_SCORE_THRESHOLD = 20.0 # 몇 점 이상이면 이상으로 볼 것인가
@@ -50,7 +53,7 @@ async def run_rcf_temperature_analysis(
     ]
 
     temperatures = [
-        log["temperature_c"]
+        float(log["temperature_c"])
         for log in valid_logs
     ]
 
@@ -64,8 +67,8 @@ async def run_rcf_temperature_analysis(
             "id": log["id"],
             "factory_id": log["factory_id"],
             "node_id": log["node_id"],
-            "temperature_c": log["temperature_c"],
-            "humidity_pct": log["humidity_pct"],
+            "temperature_c": float(log["temperature_c"]),
+            "humidity_pct": float(log["humidity_pct"]) if log["humidity_pct"] is not None else None,
             "measured_at": log["measured_at"],
             "rcf_score": round(score, 3),
             "is_anomaly": is_anomaly,
@@ -76,13 +79,41 @@ async def run_rcf_temperature_analysis(
         if row["is_anomaly"]
     ]
 
+    saved_alerts = []
+
+    if anomaly_results:
+        alert_type = "RCF_TEMPERATURE_ANOMALY"
+        time_limit = datetime.now(timezone.utc) - timedelta(seconds=300)
+
+        is_duplicate = await check_duplicate_alert(
+            db=db,
+            factory_id=factory_id,
+            alert_type=alert_type,
+            time_limit=time_limit,
+        )
+
+        if not is_duplicate:
+            saved_alert = await insert_alert(
+                db=db,
+                factory_id=factory_id,
+                priority="high",
+                severity="warning",
+                alert_type=alert_type,
+                message=f"RCF 온도 이상 감지: 이상 데이터 {len(anomaly_results)}건 발견",
+            )
+            saved_alerts.append(saved_alert)
+
     return {
         "success": True,
         "factory_id": factory_id,
         "checked_count": len(results),
         "anomaly_count": len(anomaly_results),
+        "saved_alert_count": len(saved_alerts),
         "threshold": RCF_SCORE_THRESHOLD,
         "anomalies": anomaly_results,
+        "saved_alerts": saved_alerts,
         "results": results,
-        "message": "RCF temperature analysis executed",
+        "message": "RCF 기반 온도 이상 분석이 완료되었습니다.",
     }
+
+    
