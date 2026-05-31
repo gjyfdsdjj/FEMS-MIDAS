@@ -106,6 +106,17 @@ class SensorLog(Base):
     measured_at = Column(DateTime(timezone=True))
     logged_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
+class SensorLogArchive(Base):
+    __tablename__ = "sensor_logs_archive"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    factory_id = Column(BigInteger, nullable=False)
+    node_id = Column(Text)
+    temperature_c = Column(Numeric(5, 2))
+    humidity_pct = Column(Numeric(5, 2))
+    measured_at = Column(DateTime(timezone=True))
+    logged_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
 
 class ReadonlyToken(Base):
     __tablename__ = "readonly_tokens"

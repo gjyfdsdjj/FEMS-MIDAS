@@ -20,3 +20,4 @@ google-genai
 openai
 python-multipart
 qrcode[pil]
+rrcf
