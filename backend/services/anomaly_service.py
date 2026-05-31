@@ -29,6 +29,20 @@ TEMP_MAX_C = -16.0
 SPIKE_THRESHOLD_C = 5.0
 COMMUNICATION_TIMEOUT_SEC = 180 # 임시 기준: 3분 
 
+def format_elapsed_time(seconds: float) -> str:
+    seconds = int(seconds)
+
+    if seconds < 60:
+        return f"{seconds}초"
+
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}분"
+
+    hours = minutes // 60
+    remain_minutes = minutes % 60
+    return f"{hours}시간 {remain_minutes}분"
+
 def build_anomaly_result(factory_id, priority, severity, anomaly_type, message):
     return{
         "factory_id": factory_id,
@@ -48,7 +62,11 @@ def check_temperature_range(sensor_log):
             "high",
             "critical",
             "TEMP_RANGE_OUT",
-            f"⚠️ [CRITICAL] {factory_id}번 공장 온도가 너무 낮습니다. 현재 온도: {current_temp}°C"
+            (
+                f"공장 {factory_id} 온도 이상 감지\n"
+                f"현재 온도: {current_temp}°C\n"
+                f"허용 범위({TEMP_MIN_C}°C ~ {TEMP_MAX_C}°C)를 벗어났습니다."
+            )
         )
     if current_temp > TEMP_MAX_C:
         return build_anomaly_result(
@@ -56,7 +74,11 @@ def check_temperature_range(sensor_log):
             "high",
             "critical",
             "TEMP_RANGE_OUT",
-            f"⚠️ [CRITICAL] {factory_id}번 공장 온도가 너무 높습니다. 현재 온도: {current_temp}°C"
+            (
+                f"공장 {factory_id} 온도 이상 감지\n"
+                f"현재 온도: {current_temp}°C\n"
+                f"허용 범위({TEMP_MIN_C}°C ~ {TEMP_MAX_C}°C)를 벗어났습니다."
+            )
         )
 
     return None
@@ -77,10 +99,12 @@ def check_temperature_spike(current_sensor_log, old_sensor_log):
             "medium",
             "warning",
             "TEMP_SPIKE",
-            f"⚠️ [WARNING] {factory_id}번 공장 온도가 최근 5분 구간 내 급변했습니다. "
-            f"현재 온도: {current_temp}°C, "
-            f"이전 온도: {old_temp}°C, "
-            f"변화량: {diff:.2f}°C"
+            (
+                f"공장 {factory_id} 온도 급변 감지\n"
+                f"5분 전 온도: {old_temp}°C\n"
+                f"현재 온도: {current_temp}°C\n"
+                f"변화량: {diff:.2f}°C"
+            )
         )
     return None
 
@@ -94,11 +118,12 @@ def check_communication_timeout(factory):
             "low",
             "info",
             "COMMUNICATION_TIMEOUT",
-            f"ℹ️ [INFO] {factory_id}번 공장의 최초 데이터 수신 대기 중입니다."
+            f"{factory_id}번 공장의 최초 데이터 수신 대기 중입니다."
         )
     
     now = datetime.now(last_seen_at.tzinfo)
-    elapsed_sec = (now - last_seen_at).total_seconds() # 경과 시간
+    elapsed_sec = (now - last_seen_at).total_seconds()
+    elapsed_text = format_elapsed_time(elapsed_sec)
 
     if elapsed_sec >= COMMUNICATION_TIMEOUT_SEC:
         return build_anomaly_result(
@@ -106,7 +131,10 @@ def check_communication_timeout(factory):
             "high",
             "critical",
             "COMMUNICATION_TIMEOUT",
-            f"⚠️ [CRITICAL] {factory_id}번 공장 센서 데이터가 {int(elapsed_sec)}초 동안 수신되지 않았습니다."
+            (
+                f"<<공장 {factory_id} 통신 이상 감지>>\n"
+                f"센서 데이터가 {elapsed_text} 동안 수신되지 않았습니다."
+            )
         )
     
     return None
