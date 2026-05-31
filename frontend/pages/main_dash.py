@@ -9,6 +9,8 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
+
 
 API_BASE_URL = "http://localhost:8000"
 
@@ -84,7 +86,7 @@ def load_dummy_data():
 dummy_data = load_dummy_data()
 
 
-def api_get(path: str, params: dict = None) -> dict | None:
+def api_get(path: str, params: dict = None) -> Optional[dict]:
     try:
         resp = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=5)
         resp.raise_for_status()
@@ -152,13 +154,13 @@ def fetch_sensor_history(factory_id: int) -> list[float]:
 
 
 @st.cache_data(ttl=120)
-def fetch_temp_predict(factory_id: int) -> dict | None:
+def fetch_temp_predict(factory_id: int) -> Optional[dict]:
     result = api_get(f"/api/v1/analytics/temperature-predict/{factory_id}")
     return result if result and result.get("predicted_temp") is not None else None
 
 
 @st.cache_data(ttl=120)
-def fetch_maintenance(factory_id: int) -> dict | None:
+def fetch_maintenance(factory_id: int) -> Optional[dict]:
     result = api_get(f"/api/v1/operations/maintenance/{factory_id}")
     return result if result else None
 
@@ -172,7 +174,7 @@ def fetch_jobs() -> list[dict]:
 
 
 @st.cache_data(ttl=10800)
-def fetch_weather() -> dict | None:
+def fetch_weather() -> Optional[dict]:
     result = api_get("/api/v1/weather/tomorrow")
     if not result or not result.get("forecasts"):
         return None
