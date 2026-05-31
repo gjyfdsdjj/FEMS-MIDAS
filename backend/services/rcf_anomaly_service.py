@@ -1,19 +1,18 @@
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone, timedelta
+
 from repositories.sensor_log_archive_repository import get_recent_archive_sensor_logs
-from datetime import datetime, timedelta, timezone
-from repositories.alert_repository import check_duplicate_alert, insert_alert
+from repositories.alert_repository import check_duplicate_alert
+from services.alert_service import create_alert
 
 import rrcf
 
-RCF_SCORE_THRESHOLD = 20.0 # 몇 점 이상이면 이상으로 볼 것인가
 
-'''
-Random Cut Forest 기반 이상 점수 계산
-    - 온도값 1개를 1차원 포인트로 사용
-    - codisp 값이 높을수록 이상 가능성이 높음
-'''
+RCF_SCORE_THRESHOLD = 20.0
+RCF_ALERT_THRESHOLD = 40.0
+
+
 def calculate_rcf_score(values: list[float]) -> list[float]:
-
     if not values:
         return []
 
@@ -22,19 +21,18 @@ def calculate_rcf_score(values: list[float]) -> list[float]:
 
     for index, value in enumerate(values):
         point = [value]
-
-        tree.insert_point(point, index=index) # 온도 데이터를 하나씩 트리에 삽입
+        tree.insert_point(point, index=index)
 
         if len(tree.leaves) < 10:
             scores.append(0.0)
             continue
 
-        score = tree.codisp(index) # 방금 넣은 값이 얼마나 이상한지 점수 
-        scores.append(float(score)) # 이상 점수는 리스트에 저장
+        score = tree.codisp(index)
+        scores.append(float(score))
 
     return scores
 
-# sensor_logs_archive 데이터를 기반으로 온도 이상 패턴 분석
+
 async def run_rcf_temperature_analysis(
     db: AsyncSession,
     factory_id: int,
@@ -81,27 +79,33 @@ async def run_rcf_temperature_analysis(
 
     saved_alerts = []
 
-    if anomaly_results:
-        alert_type = "RCF_TEMPERATURE_ANOMALY"
+    max_score = max(
+        [row["rcf_score"] for row in anomaly_results],
+        default=0.0,
+    )
+
+    if anomaly_results and max_score >= RCF_ALERT_THRESHOLD:
         time_limit = datetime.now(timezone.utc) - timedelta(seconds=300)
 
-        is_duplicate = await check_duplicate_alert(
+        has_recent_rule_alert = await check_duplicate_alert(
             db=db,
             factory_id=factory_id,
-            alert_type=alert_type,
+            alert_type="TEMP_RANGE_OUT",
             time_limit=time_limit,
         )
 
-        if not is_duplicate:
-            saved_alert = await insert_alert(
+        if not has_recent_rule_alert:
+            saved_alert = await create_alert(
                 db=db,
                 factory_id=factory_id,
                 priority="high",
                 severity="warning",
-                alert_type=alert_type,
-                message=f"RCF 온도 이상 감지: 이상 데이터 {len(anomaly_results)}건 발견",
+                alert_type="RCF_TEMPERATURE_PATTERN",
+                message=f"RCF 기반 온도 패턴 이상 감지: 최대 score={max_score}",
             )
-            saved_alerts.append(saved_alert)
+
+            if saved_alert is not None:
+                saved_alerts.append(saved_alert)
 
     return {
         "success": True,
@@ -112,8 +116,8 @@ async def run_rcf_temperature_analysis(
         "threshold": RCF_SCORE_THRESHOLD,
         "anomalies": anomaly_results,
         "saved_alerts": saved_alerts,
+        "alert_threshold": RCF_ALERT_THRESHOLD,
+        "max_score": max_score,
         "results": results,
         "message": "RCF 기반 온도 이상 분석이 완료되었습니다.",
     }
-
-    
