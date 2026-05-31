@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # backend/models/schemas.py
 # Pydantic 모델 정의 (요청/응답 스키마)
 #

@@ -71,7 +71,7 @@ def factory_detail(
             with st.container(key=f"detail_metric_chart_{idx}"):
                 st.plotly_chart(
                     sparkline_fig(spark, clr, 50),
-                    use_container_width=True,
+                    width="stretch",
                     config={"displayModeBar": False}
                 )
 

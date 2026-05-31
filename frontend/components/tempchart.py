@@ -89,6 +89,6 @@ def temp_chart(data):
 
         st.plotly_chart(
             fig,
-            width="stretch",
+            use_container_width=True,
             config={"displayModeBar": False},
         )

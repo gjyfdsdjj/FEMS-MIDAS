@@ -176,7 +176,7 @@ def energy_cost(dummy_data):
 
     with top_left:
         st.markdown('<div class="card-title">시간대별 전력 비용 비교</div>', unsafe_allow_html=True)
-        st.plotly_chart(energy_cost_fig(dummy_data), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(energy_cost_fig(dummy_data), use_container_width=True, config={"displayModeBar": False})
 
         ch = dummy_data.get("charts", {}).get("hourly", {})
         b_sum = sum(ch.get("before_optimization", []))
@@ -194,7 +194,7 @@ def energy_cost(dummy_data):
 
     with top_right:
         st.markdown('<div class="card-title">오늘 태양광 발전 예측</div>', unsafe_allow_html=True)
-        st.plotly_chart(solar_predict_fig(dummy_data), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(solar_predict_fig(dummy_data), use_container_width=True, config={"displayModeBar": False})
 
         sd = dummy_data.get("predict_solar", [])
         max_sol = max((s["predicted_solar_kwh"] for s in sd), default=0)
@@ -216,10 +216,10 @@ def energy_cost(dummy_data):
         sm_, sd_ = st.tabs(["월별", "일별"])
 
         with sm_:
-            st.plotly_chart(savings_fig(dummy_data, "monthly"), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(savings_fig(dummy_data, "monthly"), use_container_width=True, config={"displayModeBar": False})
 
         with sd_:
-            st.plotly_chart(savings_fig(dummy_data, "daily"), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(savings_fig(dummy_data, "daily"), use_container_width=True, config={"displayModeBar": False})
 
         st.markdown("""
         <div style="border-top:0.5px solid #e0e3ea;padding-top:8px;
