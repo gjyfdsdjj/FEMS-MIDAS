@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 
 
 def factory_status(
@@ -86,7 +86,7 @@ def factory_status(
 
                     if st.button(button_text, key=button_key, width="stretch"):
                         fac = st.session_state.factories[i]
-                        node_id = fac.get("node_id", "nodeA")
+                        node_id = fac.get("node_id", "node_A")
                         factory_id = fac["factory_id"]
                         if is_stopped:
                             st.session_state.factories[i]["manual_stop"] = False

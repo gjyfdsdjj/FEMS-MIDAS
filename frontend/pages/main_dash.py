@@ -870,8 +870,12 @@ def voice_dialog():
         confirm_col, cancel_col = st.columns(2)
         with confirm_col:
             if st.button("실행하기", use_container_width=True, type="primary"):
+                _fac_node = next(
+                    (f.get("node_id", "node_A") for f in st.session_state.get("factories", []) if f["factory_id"] == selected_fid),
+                    "node_A"
+                )
                 nl_body = {
-                    "node_id": "nodeA",
+                    "node_id": _fac_node,
                     "factory_id": selected_fid,
                     "action": cmd["action"],
                     "reason": f"음성 명령: {cmd.get('summary', '')}",
