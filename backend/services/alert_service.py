@@ -75,7 +75,14 @@ async def create_alert(db: AsyncSession, factory_id: int, priority: str, severit
     
     # 4. CRITICAL / WARNING 이면 send_telegram 호출
     if severity.lower() in ["critical", "warning"]:
-        telegram_msg = f"⚠️ [{severity.upper()}] 공장 {factory_id}번 알림\n타입: {alert_type}\n내용: {message}"
+        telegram_msg = (
+        f"🚨 [FEMS-MIDAS] 냉동공장 이상 감지\n\n"
+        f"■ 심각도: ⚠️{severity.upper()}\n"
+        f"■ 대상 공장: {factory_id}번 공장\n"
+        f"■ 이상 유형: {alert_type}\n"
+        f"■ 상세 내용: {message}\n"
+        f"※ 관리자 확인이 필요합니다."
+    )
         await send_telegram(telegram_msg)
         
     return new_alert
