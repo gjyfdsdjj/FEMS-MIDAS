@@ -31,6 +31,7 @@ from routers.factories import router as factories_router
 from routers.alerts import router as alerts_router
 from routers.jobs import router as jobs_router
 from routers.schedule import router as schedule_router
+from routers.rcf import router as rcf_router
 
 app = FastAPI()
 mqtt_subscriber: MQTTSubscriber = None
@@ -55,6 +56,7 @@ app.include_router(factories_router)
 app.include_router(alerts_router)
 app.include_router(jobs_router)
 app.include_router(schedule_router)
+app.include_router(rcf_router)
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
