@@ -14,7 +14,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT_DIR / ".env", override=False)
 
 DEFAULT_API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
-DEFAULT_NODE_ID = os.getenv("NODE_ID", "nodeA")
+DEFAULT_NODE_ID = os.getenv("NODE_ID", "node_A")
 DEFAULT_FACTORY_IDS = [
     int(value.strip())
     for value in os.getenv("FACTORY_IDS", "1").split(",")
@@ -460,4 +460,3 @@ with st.expander("Command Log", expanded=False):
     for entry in st.session_state["command_log"]:
         st.write(f"{entry['time']} / {entry['action']} / {'OK' if entry['ok'] else 'ERROR'}")
         st.json({"body": entry["body"], "result": entry["result"]})
-
