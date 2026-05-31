@@ -6,13 +6,17 @@ import time
 import sys
 import base64
 import requests
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 def issue_qr_token(factory_id):
     try:
@@ -336,17 +340,26 @@ def _merge_api_data():
         if all_history:
             dummy_data["sensor_logs"] = all_history
 
-    # predict_temperature
+    # predict_temperature — API 단일 예측값을 시계열로 변환
+    from datetime import timedelta as _td
+    _now = datetime.now()
     tp_list = []
     for fid, data in api_temp_predict.items():
-        if data:
-            tp_list.append({
-                "factory_id": fid,
-                "predicted_temp": data.get("predicted_temp"),
-                "current_temp": data.get("current_temp"),
-                "trend": data.get("trend", "안정"),
-                "horizon_minutes": data.get("horizon_minutes", 60),
-            })
+        if data and data.get("predicted_temp") is not None:
+            current = data.get("current_temp") or data["predicted_temp"]
+            predicted = data["predicted_temp"]
+            horizon = data.get("horizon_minutes", 60)
+            steps = 4
+            for i in range(steps + 1):
+                t = _now + _td(minutes=horizon * i / steps)
+                temp = round(current + (predicted - current) * i / steps, 2)
+                tp_list.append({
+                    "factory_id": fid,
+                    "timestamp": t.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "predicted_temperature_c": temp,
+                    "lower_bound_c": round(temp - 0.5, 2),
+                    "upper_bound_c": round(temp + 0.5, 2),
+                })
     if tp_list:
         dummy_data["predict_temperature"] = tp_list
 
@@ -355,7 +368,9 @@ def _merge_api_data():
     for fid, data in api_maintenance.items():
         if data:
             rec = data.get("recommendation", "UNKNOWN")
-            risk = "LOW" if rec == "NORMAL" else "HIGH" if rec == "MAINTENANCE_REQUIRED" else "MEDIUM"
+            if rec == "UNKNOWN":
+                continue
+            risk = "LOW" if rec == "NORMAL" else "HIGH"
             mpd = data.get("minutes_per_degree")
             health = round(max(0.0, min(1.0, 1.0 - (mpd - 10) / 20)), 2) if mpd else 1.0
             mt_list.append({

@@ -111,3 +111,32 @@
 각자 자기가 한거 뭐지?
 
 발표 어떻게 하지?
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 현재 진행 중인 작업 (2026-05-26)
+
+[완료]
+- Python 3.9 호환성 수정 (dict | None 문법 오류)
+  → frontend/pages/main_dash.py, backend/services/control_service.py 등
+- .env API_BASE_URL ngrok URL로 변경
+- main_dash.py에서 .env의 API_BASE_URL 읽도록 수정
+- qr_dash.py meta refresh 제거 → st.rerun() 방식으로 교체
+  (main_dash에서 qr_dash로 자동 이탈하던 버그 수정)
+
+[완료 추가]
+- Cloudflare Tunnel 설정 (백엔드 8000 + 프론트 8501 동시 터널)
+- QR 기능 완성 (FRONTEND_BASE_URL 설정, MOCK_MODE = False, 폰 스캔 확인)
+
+[완료 추가 - 오늘]
+- QR 공장별 분리 버그 수정 (factory_id == 1 조건 제거 → 전 공장 QR 발급 가능)
+- QR MOCK_MODE = False → 실제 토큰 기반 공장 데이터 표시
+- models.py DB 스키마 동기화
+  → factories.last_sensor_log_at, schedules.expected_grid_kwh 누락 컬럼 추가
+- 온도 예측 차트 수정
+  → API 단일 예측값을 5포인트 시계열로 변환해서 차트에 표시
+- MQTT 수신 센서값 보정 저장
+  → 온도 -45, 습도 +20 적용 후 DB 저장 (실내 센서값 → 냉동창고 범위로 변환)
+
+[남은 작업]
+- TELEGRAM_BOT_TOKEN 설정 (팀원이 진행 예정)

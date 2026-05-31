@@ -24,6 +24,7 @@ class Factory(Base):
     target_temp_c = Column(Float)
     current_stock_units = Column(BigInteger)
     control_mode = Column(String(20), server_default="AUTO")
+    last_sensor_log_at = Column(DateTime(timezone=True))
 
 priority_enum = ENUM("high", "medium", "low", name="alerts_priority", create_type=False)
 severity_enum = ENUM("critical", "warning", "info", name="alerts_severity", create_type=False)
@@ -51,6 +52,7 @@ class Schedule(Base):
     start_at = Column(DateTime(timezone=True))
     end_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expected_grid_kwh = Column(Float)
 
 
 class Job(Base):

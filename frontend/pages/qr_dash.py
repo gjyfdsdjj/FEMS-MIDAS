@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent
 sys.path.append(str(BASE_DIR))
 load_dotenv(ROOT_DIR / ".env", override=False)
-MOCK_MODE = True
+MOCK_MODE = False
 MOCK_DATA_PATH = ROOT_DIR / "backend" / "database" / "dummy_data.jsonc"
 
 
@@ -148,8 +148,6 @@ status_badge_map = {
 status_text = status_map.get(data["status"], data["status"])
 status_badge = status_badge_map.get(data["status"], "badge-off")
 
-st.markdown("""<meta http-equiv="refresh" content="30">""", unsafe_allow_html=True)
-
 st.markdown(
     f"""
 <div class="dashboard-title">
@@ -285,6 +283,10 @@ else:
 
     if last_error:
         st.warning(last_error)
+
+import time as _time
+_time.sleep(30)
+st.rerun()
 
 
 st.markdown(

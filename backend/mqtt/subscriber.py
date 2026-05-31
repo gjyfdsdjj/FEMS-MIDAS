@@ -60,11 +60,15 @@ class MQTTSubscriber:
             async with AsyncSessionLocal() as session:
                 ts_raw = payload.get("timestamp")
                 measured_at = datetime.fromisoformat(ts_raw) if ts_raw else None
+                raw_temp = payload.get("temperature_c")
+                raw_hum = payload.get("humidity_pct")
+                adj_temp = round(raw_temp - 45, 2) if raw_temp is not None else None
+                adj_hum = round(min(95, raw_hum + 20), 2) if raw_hum is not None else None
                 log = SensorLog(
                     factory_id=payload["factory_id"],
                     node_id=payload.get("node_id"),
-                    temperature_c=payload.get("temperature_c"),
-                    humidity_pct=payload.get("humidity_pct"),
+                    temperature_c=adj_temp,
+                    humidity_pct=adj_hum,
                     measured_at=measured_at,
                 )
                 session.add(log)
