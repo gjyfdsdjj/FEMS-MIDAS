@@ -121,6 +121,78 @@ DEFAULT_DUMMY_DATA_PATH = (
 _SCHEDULER: Any | None = None
 _LAST_JOB_A_RESULT: dict[str, Any] | None = None
 _JOB_A_LOGS: list[dict[str, Any]] = []
+_MAIN_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+async def _load_db_data() -> dict[str, Any]:
+    """Supabase에서 factories와 active job을 읽어 더미 데이터 형식으로 반환."""
+    try:
+        from database.connection import AsyncSessionLocal
+        from database.models import Factory, Job
+        from sqlalchemy import select
+    except Exception:
+        from backend.database.connection import AsyncSessionLocal
+        from backend.database.models import Factory, Job
+        from sqlalchemy import select
+
+    result: dict[str, Any] = {}
+
+    async with AsyncSessionLocal() as session:
+        # factories
+        rows = (await session.execute(select(Factory).order_by(Factory.factory_id))).scalars().all()
+        result["factories"] = [
+            {
+                "factory_id": f.factory_id,
+                "name": f.name or f"Factory {f.factory_id}",
+                "status": f.status or "stopped",
+                "temperature_c": f.current_temp,
+                "humidity_pct": f.current_humidity,
+                "target_temp_c": f.target_temp_c if f.target_temp_c is not None else -18.0,
+                "manual_stop": bool(f.manual_stop),
+                "node_id": f.node_id or "node_A",
+                "capacity_units": f.max_quantity or 0,
+                "current_stock_units": f.current_stock_units or 0,
+                "control_mode": f.control_mode or "AUTO",
+            }
+            for f in rows
+        ]
+
+        # active job (pending 또는 in_progress 중 최신 1건)
+        from sqlalchemy import cast, String as SAString
+        job_row = (await session.execute(
+            select(Job)
+            .where(cast(Job.status, SAString).in_(["pending", "in_progress"]))
+            .order_by(Job.created_at.desc())
+            .limit(1)
+        )).scalars().first()
+
+        if job_row:
+            qty = job_row.quantity or 0
+            produced = job_row.produced_units or 0
+            result["active_job"] = {
+                "job_id": str(job_row.id),
+                "target_units": qty,
+                "produced_units": produced,
+                "deadline_at": job_row.deadline_at.isoformat() if job_row.deadline_at else None,
+                "is_active": True,
+                "dynamic_scheduling_enabled": bool(job_row.dynamic_scheduling_enabled),
+                "daily_shipment_hour": int(job_row.daily_shipment_hour or 6),
+                "strategy": "BALANCED",
+            }
+
+    return result
+
+
+def _fetch_db_data_sync() -> dict[str, Any]:
+    """스케줄러 스레드에서 _MAIN_LOOP으로 DB 데이터를 동기적으로 가져온다."""
+    if _MAIN_LOOP is None:
+        return {}
+    try:
+        future = asyncio.run_coroutine_threadsafe(_load_db_data(), _MAIN_LOOP)
+        return future.result(timeout=10)
+    except Exception as e:
+        print(f"[Job A] DB 데이터 로드 실패, 더미 사용: {e}")
+        return {}
 
 
 @dataclass
@@ -788,7 +860,18 @@ def run_job_a_optimization(
     global _LAST_JOB_A_RESULT
 
     data = load_dummy_data(data_path)
-    # dry_run=False(실제 실행)이면 항상 현재 시각 사용, 테스트일 때만 더미 시각 허용
+
+    # dry_run=False 이면 DB에서 실데이터 로드 후 더미 덮어씌우기
+    if not dry_run:
+        db_data = _fetch_db_data_sync()
+        if db_data.get("factories"):
+            data["factories"] = db_data["factories"]
+            print(f"[Job A] DB factories 로드: {len(db_data['factories'])}개")
+        if db_data.get("active_job"):
+            # jobs 리스트의 첫 항목을 active job으로 교체
+            data["jobs"] = [db_data["active_job"]]
+            print(f"[Job A] DB active_job 로드: {db_data['active_job']['job_id']}")
+
     resolved_now = _resolve_now(data, now=now) if dry_run else (now or datetime.now(timezone.utc))
     active_job = _active_job(data)
     if active_job is None:
@@ -940,11 +1023,10 @@ def run_job_a_optimization(
 
     if not dry_run and blocks:
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                future = asyncio.run_coroutine_threadsafe(_save_blocks_to_db(blocks), loop)
+            if _MAIN_LOOP is not None:
+                future = asyncio.run_coroutine_threadsafe(_save_blocks_to_db(blocks), _MAIN_LOOP)
                 future.result(timeout=30)
-            except RuntimeError:
+            else:
                 asyncio.run(_save_blocks_to_db(blocks))
             result["db_saved"] = True
         except Exception as e:
@@ -956,13 +1038,20 @@ def run_job_a_optimization(
         except Exception:
             from mqtt.publisher import publisher
 
-        node_id = os.getenv("NODE_ID", "node_A")
+        # 공장별 node_id 매핑
+        factory_node_map = {
+            int(f.get("factory_id")): f.get("node_id", os.getenv("NODE_ID", "node_A"))
+            for f in data.get("factories", [])
+            if f.get("factory_id")
+        }
         published = 0
         for block in blocks:
             try:
+                fid = int(block["factory_id"])
+                node_id = factory_node_map.get(fid, os.getenv("NODE_ID", "node_A"))
                 publisher.publish_command(
                     node_id,
-                    int(block["factory_id"]),
+                    fid,
                     "SET_TARGET_TEMP",
                     {
                         "value": block.get("recommended_temp_c", block.get("target_temp_c")),
@@ -987,12 +1076,24 @@ def run_job_b_update_environment_weights() -> dict[str, Any]:
 def run_job_c_monitor_alerts() -> dict[str, Any]:
     """Job C: 1분 주기 이상 감지 및 알림 감시 작업."""
     if anomaly_service is None:
-        return{
+        return {
             "success": False,
             "skipped": True,
             "reason": "ANOMALY_SERVICE_NOT_AVAILABLE"
         }
-    return anomaly_service.run_anomaly_monitoring()
+
+    async def _run():
+        try:
+            from backend.database.connection import AsyncSessionLocal
+        except Exception:
+            from database.connection import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            return await anomaly_service.run_anomaly_monitoring(db)
+
+    result = asyncio.run(_run())
+    print(f"[Job C] 이상 감지 완료: alerts_created={result.get('alerts_created')}, checked_count={result.get('checked_count')}")
+    return result
 
 
 def get_scheduler() -> Any:

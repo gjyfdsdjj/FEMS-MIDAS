@@ -1,0 +1,142 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  FEMS-MIDAS 개발 내용 (발표용 정리)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 인프라 / 환경
+
+1. Supabase DB 연결
+   - PostgreSQL 기반 클라우드 DB (Supabase)
+   - SQLAlchemy + asyncpg로 비동기 연결
+   - Session Pooler URL 방식 (IPv6 문제 해결)
+   - Windows asyncio DNS 버그 → WindowsSelectorEventLoopPolicy 적용
+
+2. Mosquitto MQTT 브로커 설정
+   - 로컬 PC에 Mosquitto 설치 및 실행
+   - 기본값은 localhost만 허용 → mosquitto.conf에 listener 1883 + allow_anonymous true 추가
+   - 외부(RPi4)에서 접속 가능하도록 설정
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 백엔드
+
+3. FastAPI 앱 기본 구조 (main.py)
+   - FastAPI 프레임워크로 백엔드 서버 구성
+   - 앱 시작 시 DB 연결 확인, MQTT 브로커 연결, 스케줄러 시작 자동 실행
+   - sensors, control, weather, operations 등 모든 라우터 등록
+   - uvicorn으로 실행: python -m uvicorn main:app --reload
+   - /docs 에서 Swagger UI로 모든 API 테스트 가능
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 하드웨어 (Raspberry Pi 4)
+
+5. DHT22 센서 연동
+   - GPIO4 핀에 DHT22 온습도 센서 연결
+   - adafruit-circuitpython-dht 라이브러리 사용
+   - RPi4에서 use_pulseio=False 설정 필요 (GPIO 호환 문제 해결)
+   - 5초마다 온도/습도 측정 후 MQTT 발행
+
+6. MQTT 양방향 통신
+   - RPi4 → 백엔드: factory/node_A/{factory_id}/telemetry 토픽으로 센서 데이터 발행
+   - 백엔드 → RPi4: factory/node_A/{factory_id}/command 토픽으로 제어 명령 수신
+   - 명령 수신 시 on_command 콜백으로 분기 처리
+   - SET_TARGET_TEMP 명령 수신 → PeltierController로 목표 온도까지 냉각 시작
+   - 오프라인 시 LocalBuffer에 데이터 임시 저장, 재연결 시 자동 전송
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ QR 실DB 연결
+
+7. QR 대시보드 실DB 연결
+   - qr_dash.py: Streamlit 기반 모바일 최적화 대시보드
+   - /api/v1/readonly/{token} API 호출 → 실제 Supabase 데이터 표시
+   - 표시 항목: 실시간 온습도 카드, 24시간 온도 추이 차트, 펠티어 상태
+   - 30초마다 자동 갱신
+   - readonly.py 백엔드: factories + sensor_logs 테이블 조회, 현재/다음 스케줄 포함
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 운영 분석 API (10개)
+
+  operations_service.py + routers/operations.py 구현
+  엔드포인트: GET /api/v1/operations/{기능}/{factory_id}
+
+  1. 센서 신뢰도 점수 (/sensor-reliability)
+     - 5초 간격 기준 기대 수신 건수 대비 실제 수신 건수 비율
+     - EXCELLENT(98%↑) / GOOD(90%↑) / POOR 등급
+     - 발표 수치: "공장 1 신뢰도 98.3%"
+
+  2. 온도 안정성 지표 (/temperature-stability)
+     - 기간 내 온도 표준편차 계산
+     - 편차 낮을수록 안정적: STABLE(0.5↓) / MODERATE / UNSTABLE
+     - 냉각 시스템 안정성 정량화
+
+  3. 목표 온도 유지율 (/target-adherence)
+     - schedules 테이블의 목표 온도 ± 2°C 범위 유지한 시간 비율
+     - "우리 시스템이 X% 목표 온도 유지" 발표 수치
+
+  4. 운영 효율 점수 (/efficiency-score)
+     - 세 지표 종합: 센서신뢰도(30%) + 온도안정성(30%) + 목표온도유지율(40%)
+     - 0~100점, A/B/C/D 등급
+     - 공장별 운영 상태를 하나의 수치로 요약
+
+  5. 재고 용량 점유율 (/inventory)
+     - 진행 중인 jobs 수량 합계 / factories.max_quantity
+     - NORMAL / HIGH(80%↑) / FULL(95%↑) 상태
+
+  6. 작업 마감 준수율 (/job-compliance)
+     - 마감 지난 jobs 중 completed/closed 상태 비율
+     - FEMS 핵심 목적: 납기 준수 여부 정량화
+
+  7. 도어 이벤트 분석 (/door-events)
+     - 1분 내 1°C 이상 온도 급상승 구간을 도어 열림으로 추정
+     - 5분 내 중복 제거로 실제 이벤트 횟수 산출
+     - 도어 개폐가 온도에 미치는 영향 분석
+
+  8. 냉각 사이클 분석 (/cooling-cycles)
+     - 이동평균으로 노이즈 제거 후 온도 방향 전환 횟수 계산
+     - 하루 냉각 ON/OFF 사이클 수, 평균 사이클 시간
+
+  9. 인원 감지 연계 분석 (/human-presence)
+     - 상위 10% 온도 구간을 인원 활동 기간으로 추정
+     - 전체 평균 대비 활동 시 온도 상승폭 계산
+     - factories.is_human 컬럼 활용
+
+  10. 유지보수 권고 (/maintenance)
+      - 냉각 효율 분석: 온도 1도 내리는데 걸리는 평균 시간 계산
+      - 기준치(15분/도) 초과 시 "설비 점검 권고" 반환
+      - analytics_service.cooling_efficiency() 결과 활용
+
+각자 자기가 한거 뭐지?
+
+발표 어떻게 하지?
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 현재 진행 중인 작업 (2026-05-26)
+
+[완료]
+- Python 3.9 호환성 수정 (dict | None 문법 오류)
+  → frontend/pages/main_dash.py, backend/services/control_service.py 등
+- .env API_BASE_URL ngrok URL로 변경
+- main_dash.py에서 .env의 API_BASE_URL 읽도록 수정
+- qr_dash.py meta refresh 제거 → st.rerun() 방식으로 교체
+  (main_dash에서 qr_dash로 자동 이탈하던 버그 수정)
+
+[완료 추가]
+- Cloudflare Tunnel 설정 (백엔드 8000 + 프론트 8501 동시 터널)
+- QR 기능 완성 (FRONTEND_BASE_URL 설정, MOCK_MODE = False, 폰 스캔 확인)
+
+[완료 추가 - 오늘]
+- QR 공장별 분리 버그 수정 (factory_id == 1 조건 제거 → 전 공장 QR 발급 가능)
+- QR MOCK_MODE = False → 실제 토큰 기반 공장 데이터 표시
+- models.py DB 스키마 동기화
+  → factories.last_sensor_log_at, schedules.expected_grid_kwh 누락 컬럼 추가
+- 온도 예측 차트 수정
+  → API 단일 예측값을 5포인트 시계열로 변환해서 차트에 표시
+- MQTT 수신 센서값 보정 저장
+  → 온도 -45, 습도 +20 적용 후 DB 저장 (실내 센서값 → 냉동창고 범위로 변환)
+
+[남은 작업]
+- TELEGRAM_BOT_TOKEN 설정 (팀원이 진행 예정)

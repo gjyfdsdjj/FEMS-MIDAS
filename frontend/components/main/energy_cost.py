@@ -38,11 +38,11 @@ def energy_cost_fig(dummy_data):
         plot_bgcolor="rgba(0,0,0,0)",
         legend=dict(
             orientation="h", y=1.15, x=0,
-            font=dict(size=10, color="#888780"),
+            font=dict(size=12, color="#888780"),
             bgcolor="rgba(0,0,0,0)"
         ),
-        xaxis=dict(tickfont=dict(size=10, color="#888780"), gridcolor="#f1efe8"),
-        yaxis=dict(tickfont=dict(size=10, color="#888780"), gridcolor="#f1efe8"),
+        xaxis=dict(tickfont=dict(size=12, color="#888780"), gridcolor="#f1efe8"),
+        yaxis=dict(tickfont=dict(size=12, color="#888780"), gridcolor="#f1efe8"),
         barmode="overlay",
         hovermode="x unified"
     )
@@ -79,7 +79,7 @@ def savings_fig(dummy_data, kind):
         marker_line_width=0,
         text=[f"₩{v}만" for v in d["vals"]],
         textposition="outside",
-        textfont=dict(size=11, color="#444441")
+        textfont=dict(size=12, color="#444441")
     ))
 
     fig.update_layout(
@@ -89,7 +89,7 @@ def savings_fig(dummy_data, kind):
         plot_bgcolor="rgba(0,0,0,0)",
         xaxis=dict(visible=False, range=[0, d["max"] * 1.25]),
         yaxis=dict(
-            tickfont=dict(size=11, color="#888780"),
+            tickfont=dict(size=13, color="#888780"),
             gridcolor="rgba(0,0,0,0)",
             categoryorder="array",
             categoryarray=d["labels"][::-1]
@@ -120,8 +120,8 @@ def solar_predict_fig(dummy_data):
         height=150,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(tickfont=dict(size=10, color="#888780"), gridcolor="rgba(0,0,0,0)"),
-        yaxis=dict(tickfont=dict(size=10, color="#888780"), gridcolor="#f1efe8", ticksuffix="kWh"),
+        xaxis=dict(tickfont=dict(size=12, color="#888780"), gridcolor="rgba(0,0,0,0)"),
+        yaxis=dict(tickfont=dict(size=12, color="#888780"), gridcolor="#f1efe8", ticksuffix="kWh"),
         showlegend=False
     )
     return fig
@@ -151,8 +151,8 @@ def tou_status_html(dummy_data):
 
         items.append(
             f'<div style="flex:1;padding:6px 8px;border-radius:6px;background:{bg};border:{border}">'
-            f'<div style="font-size:10px;color:#888780">{sh:02d}~{eh:02d}시</div>'
-            f'<div style="font-size:13px;font-weight:600;color:{color}">₩{price}</div>'
+            f'<div style="font-size:13px;color:#888780">{sh:02d}~{eh:02d}시</div>'
+            f'<div style="font-size:15px;font-weight:600;color:{color}">₩{price}</div>'
             f'{current_badge}'
             f'</div>'
         )
@@ -162,7 +162,7 @@ def tou_status_html(dummy_data):
         f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
         f'<span></span>'
         f'<span style="font-size:16px;font-weight:600;color:#e24b4a">₩{current}'
-        f'<span style="font-size:10px;font-weight:400;color:#888780"> /kWh</span></span>'
+        f'<span style="font-size:12px;font-weight:400;color:#888780"> /kWh</span></span>'
         f'</div>'
         f'<div style="display:flex;gap:5px">'
         f'{"".join(items)}'
@@ -172,11 +172,52 @@ def tou_status_html(dummy_data):
 
 
 def energy_cost(dummy_data):
-    top_left, top_right = st.columns([1.2, 1], gap="large")
+    if "energy_sub_menu" not in st.session_state:
+        st.session_state.energy_sub_menu = "전력 비용"
 
-    with top_left:
+    menu_items = ["전력 비용", "태양광 발전", "누적 절감액", "TOU"]
+    menu_keys = ["cost", "solar", "savings", "tou"]
+
+    cols = st.columns([1, 1, 1, 1, 5], gap="small")
+
+    for col, label, key in zip(cols, menu_items, menu_keys):
+        with col:
+            is_active = st.session_state.energy_sub_menu == label
+
+            st.markdown(f"""
+            <style>
+            .st-key-energy_btn_{key} button {{
+                background-color: {"#d8e5f3" if is_active else "#ffffff"} !important;
+                color: {"#ffffff" if is_active else "#444441"} !important;
+                border: 1px solid {"#aac7e7" if is_active else "#e0e3ea"} !important;
+                border-radius: 8px !important;
+                min-height: 33px !important;
+                height: 33px !important;
+                padding: 0 10px !important;
+                margin-bottom: 10px !important;
+                white-space: nowrap !important;
+            }}
+
+            .st-key-energy_btn_{key} button p {{
+                font-size: 14px !important;
+                font-weight: 500;
+                line-height: 14px !important;
+                white-space: nowrap !important;
+                word-break: keep-all !important;
+                color: {"#104f8e" if is_active else "#535350"} !important;
+            }}
+            </style>
+            """, unsafe_allow_html=True)
+
+            if st.button(label, key=f"energy_btn_{key}", use_container_width=True):
+                st.session_state.energy_sub_menu = label
+                st.rerun()
+
+    selected = st.session_state.energy_sub_menu
+
+    if selected == "전력 비용":
         st.markdown('<div class="card-title">시간대별 전력 비용 비교</div>', unsafe_allow_html=True)
-        st.plotly_chart(energy_cost_fig(dummy_data), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(energy_cost_fig(dummy_data), use_container_width=True, config={"displayModeBar": False})
 
         ch = dummy_data.get("charts", {}).get("hourly", {})
         b_sum = sum(ch.get("before_optimization", []))
@@ -186,15 +227,15 @@ def energy_cost(dummy_data):
 
         st.markdown(f"""
         <div style="display:flex;gap:16px;margin-top:-4px;flex-wrap:wrap">
-            <span style="font-size:11px;color:#888780">절감율 <b style="color:#378add">{spct}%</b></span>
-            <span style="font-size:11px;color:#888780">태양광 기여 <b style="color:#639922">₩{s_sum:,}</b></span>
-            <span style="font-size:11px;color:#888780">일일 절감 <b style="color:#1d9e75">₩{b_sum - a_sum:,}</b></span>
+            <span style="font-size:13px;color:#888780">절감율 <b style="color:#378add">{spct}%</b></span>
+            <span style="font-size:13px;color:#888780">태양광 기여 <b style="color:#639922">₩{s_sum:,}</b></span>
+            <span style="font-size:13px;color:#888780">일일 절감 <b style="color:#1d9e75">₩{b_sum - a_sum:,}</b></span>
         </div>
         """, unsafe_allow_html=True)
 
-    with top_right:
+    elif selected == "태양광 발전":
         st.markdown('<div class="card-title">오늘 태양광 발전 예측</div>', unsafe_allow_html=True)
-        st.plotly_chart(solar_predict_fig(dummy_data), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(solar_predict_fig(dummy_data), use_container_width=True, config={"displayModeBar": False})
 
         sd = dummy_data.get("predict_solar", [])
         max_sol = max((s["predicted_solar_kwh"] for s in sd), default=0)
@@ -202,33 +243,30 @@ def energy_cost(dummy_data):
 
         st.markdown(f"""
         <div style="display:flex;gap:12px;margin-top:-4px;margin-bottom:12px">
-            <span style="font-size:11px;color:#888780">최대 <b style="color:#639922">{max_sol}kWh</b></span>
-            <span style="font-size:11px;color:#888780">일계 <b style="color:#639922">{total_sol:.1f}kWh</b></span>
+            <span style="font-size:13px;color:#888780">최대 <b style="color:#639922">{max_sol}kWh</b></span>
+            <span style="font-size:13px;color:#888780">일계 <b style="color:#639922">{total_sol:.1f}kWh</b></span>
         </div>
         """, unsafe_allow_html=True)
 
-    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-
-    bottom_left, bottom_right = st.columns([1.2, 1], gap="large")
-
-    with bottom_left:
+    elif selected == "누적 절감액":
         st.markdown('<div class="card-title">누적 절감액</div>', unsafe_allow_html=True)
+
         sm_, sd_ = st.tabs(["월별", "일별"])
 
         with sm_:
-            st.plotly_chart(savings_fig(dummy_data, "monthly"), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(savings_fig(dummy_data, "monthly"), use_container_width=True, config={"displayModeBar": False})
 
         with sd_:
-            st.plotly_chart(savings_fig(dummy_data, "daily"), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(savings_fig(dummy_data, "daily"), use_container_width=True, config={"displayModeBar": False})
 
         st.markdown("""
         <div style="border-top:0.5px solid #e0e3ea;padding-top:8px;
             display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:11px;color:#888780">연간 누적</span>
+            <span style="font-size:13px;color:#888780">연간 누적</span>
             <span style="font-size:16px;font-weight:500;color:#185fa5">₩1억 2,340만</span>
         </div>
         """, unsafe_allow_html=True)
 
-    with bottom_right:
+    elif selected == "TOU":
         st.markdown('<div class="card-title">TOU 요금 현황</div>', unsafe_allow_html=True)
         st.markdown(tou_status_html(dummy_data), unsafe_allow_html=True)

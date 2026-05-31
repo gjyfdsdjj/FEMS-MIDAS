@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 
 
 def factory_status(
@@ -10,6 +10,7 @@ def factory_status(
     status_text,
     show_factory_detail,
     log_action,
+    send_command=None,
 ):
     
     st.markdown("""
@@ -30,8 +31,10 @@ def factory_status(
 
     for i, (col, f) in enumerate(zip(fc_cols, st.session_state.factories)):
         with col:
-            pct = temp_pct(f["temp"], f["min_temp"], f["max_temp"])
-            bclr = bar_color(f["temp"], f["target"])
+            cap = f.get("capacity_units") or 1
+            stock = f.get("current_stock_units") or 0
+            pct = min(100.0, stock / cap * 100)
+            bclr = "#1d9e75" if pct >= 70 else ("#ba7517" if pct >= 30 else "#e24b4a")
             sc = status_color(f["status"])
             sb = status_bg(f["status"])
             st_txt = status_text(f["status"])
@@ -50,7 +53,7 @@ def factory_status(
                     f'<div class="fc-metric-label">온도</div>'
                     f'<div style="text-align:left;padding-left:0;margin-left:0px">'
                     f'<div class="fc-metric-val">{f["temp"]:.1f}<span class="fc-metric-unit">°C</span></div>'
-                    f'<div class="fc-target-text" style="margin-top:4px;text-align:left;margin-left:0px">목표 {f["target"]}°C</div>'
+                    f'<div class="fc-target-text" style="margin-top:4px;text-align:left;margin-left:0px">목표 {round(f["target"], 1)}°C</div>'
                     f'</div>'
                     f'</div>'
                     f'<div class="fc-metric-box">'
@@ -61,7 +64,7 @@ def factory_status(
                     f'<div class="fc-bar-wrap">'
                     f'<div style="height:4px;border-radius:2px;background:{bclr};width:{pct:.1f}%"></div>'
                     f'</div>'
-                    f'<div class="fc-footer"><span>PWM <b>{f["power"]}%</b></span></div>'
+                    f'<div class="fc-footer"><span>재고 <b>{f["current_stock_units"]}/{f["capacity_units"]}개</b></span></div>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -71,7 +74,7 @@ def factory_status(
                 bc1_, bc2_ = st.columns(2)
 
                 with bc1_:
-                    if st.button("상세 보기", key=f"fcbtn_{i}", width="stretch", type="secondary"):
+                    if st.button("상세 보기", key=f"fcbtn_{i}", use_container_width=True, type="secondary"):
                         show_factory_detail(st.session_state.factories[i])
 
                 with bc2_:
@@ -80,17 +83,25 @@ def factory_status(
                     button_text = "정지 복구" if is_stopped else "비상 정지"
                     button_key = f"recoverbtn_{i}" if is_stopped else f"stopbtn_{i}"
 
+
                     if st.button(button_text, key=button_key, width="stretch"):
+                        fac = st.session_state.factories[i]
+                        node_id = fac.get("node_id", "node_A")
+                        factory_id = fac["factory_id"]
                         if is_stopped:
                             st.session_state.factories[i]["manual_stop"] = False
                             st.session_state.factories[i]["status"] = "ok"
                             st.session_state.factories[i]["power"] = 75
                             log_action(f"{f['name']} 비상 정지 복구")
+                            if send_command:
+                                send_command(node_id, factory_id, "SET_TARGET_TEMP", {"value": -19.0, "reason": "비상 정지 복구"})
                         else:
                             st.session_state.factories[i]["manual_stop"] = True
                             st.session_state.factories[i]["status"] = "err"
                             st.session_state.factories[i]["power"] = 0
                             log_action(f"{f['name']} 비상 정지")
+                            if send_command:
+                                send_command(node_id, factory_id, "STOP", {"reason": "비상 정지"})
 
                         st.session_state.emergency = any(
                             fac.get("manual_stop", False)

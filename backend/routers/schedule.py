@@ -1,17 +1,42 @@
-# backend/routers/schedule.py
-# 스케줄 최적화 엔드포인트
-#
-# POST /api/v1/schedule/compute
-#   - 권한: admin
-#   - 즉시 최적화 계산 실행 (optimization_service 호출)
-#   - apply_immediately=true 면 MQTT 명령 발행까지 수행
-#   - 응답: schedule_id, computed_at, 예상 절감액, applied 여부
-#
-# GET /api/v1/schedule/optimal
-#   - 권한: viewer
-#   - Query: job_id?, factory_id?, horizon_hours?(기본 24)
-#   - 현재 적용 중인 최신 스케줄 블록 반환
-#
-# GET /api/v1/schedule/logs
-#   - 권한: admin
-#   - 스케줄 변경 이력 (변경 시각, 이유, 예상 절감액) 커서 페이지네이션
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from database.connection import get_db
+from database.models import Schedule
+
+router = APIRouter(prefix="/api/v1/schedules", tags=["schedules"])
+
+
+def _serialize(s: Schedule) -> dict:
+    return {
+        "id": s.id,
+        "factory_id": s.factory_id,
+        "target_temp": s.target_temp,
+        "mode": s.mode,
+        "start_at": s.start_at.isoformat() if s.start_at else None,
+        "end_at": s.end_at.isoformat() if s.end_at else None,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+@router.get("")
+async def get_schedules(
+    factory_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+    q = (
+        select(Schedule)
+        .where(Schedule.end_at >= now)
+        .order_by(Schedule.factory_id, Schedule.start_at)
+    )
+    if factory_id is not None:
+        q = q.where(Schedule.factory_id == factory_id)
+
+    result = await db.execute(q)
+    rows = result.scalars().all()
+    return {"success": True, "data": [_serialize(r) for r in rows]}

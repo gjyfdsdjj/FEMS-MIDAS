@@ -225,7 +225,7 @@
       "level": "WARNING",
       "type": "TEMP_DEVIATION",       // 온도 이탈 (임계값: 목표 대비 +-2도)
       "message": "공장 3 온도가 목표 범위를 벗어났습니다. 현재 -16.2도C (목표 -18.0도C)",
-      "is_acknowledged": false,
+      "is_acknowledged": true,
       "acknowledged_by": null,
       "created_at": "2026-04-02T10:12:00+09:00"
     },

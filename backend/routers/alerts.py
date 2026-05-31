@@ -1,20 +1,70 @@
-# backend/routers/alerts.py
-# 알림 엔드포인트
-#
-# GET /api/v1/alerts
-#   - 권한: viewer
-#   - Query: factory_id?, level?, is_acknowledged?, limit?, cursor?
-#   - 최근 알림 목록 커서 페이지네이션
-#
-# PATCH /api/v1/alerts/{alert_id}/ack
-#   - 권한: admin
-#   - is_acknowledged=True, acknowledged_by, acknowledged_at 저장
-#
-# POST /api/v1/alerts/test
-#   - 권한: admin
-#   - 지정 공장으로 Telegram 테스트 메시지 발송
-#
-# GET /api/v1/alerts/rules
-#   - 권한: admin
-#   - 현재 알림 임계값 조회
-#     temp_deviation_threshold_c / communication_timeout_sec / dedup_window_sec
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+
+from database.connection import get_db
+from database.models import Alert
+
+router = APIRouter(prefix="/api/v1/alerts", tags=["alerts"])
+
+
+def _serialize(a: Alert) -> dict:
+    return {
+        "id": a.id,
+        "factory_id": a.factory_id,
+        "priority": a.priority,
+        "message": a.message,
+        "triggered_at": a.triggered_at.isoformat() if a.triggered_at else None,
+        "ack_at": a.ack_at.isoformat() if a.ack_at else None,
+        "is_acknowledged": a.ack_at is not None,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    }
+
+
+@router.get("")
+async def get_alerts(
+    factory_id: Optional[int] = Query(None),
+    is_acknowledged: Optional[bool] = Query(None),
+    limit: int = Query(50, le=200),
+    cursor: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(Alert).order_by(desc(Alert.id)).limit(limit)
+    if factory_id is not None:
+        q = q.where(Alert.factory_id == factory_id)
+    if is_acknowledged is False:
+        q = q.where(Alert.ack_at.is_(None))
+    elif is_acknowledged is True:
+        q = q.where(Alert.ack_at.isnot(None))
+    if cursor is not None:
+        q = q.where(Alert.id < cursor)
+
+    result = await db.execute(q)
+    rows = result.scalars().all()
+    return {"success": True, "data": [_serialize(r) for r in rows]}
+
+
+@router.post("/ack-all")
+async def ack_all_alerts(db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import update
+    await db.execute(
+        update(Alert)
+        .where(Alert.ack_at.is_(None))
+        .values(ack_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    return {"success": True}
+
+
+@router.patch("/{alert_id}/ack")
+async def ack_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
+    alert = await db.get(Alert, alert_id)
+    if alert is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Alert not found")
+    alert.ack_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"success": True, "data": _serialize(alert)}

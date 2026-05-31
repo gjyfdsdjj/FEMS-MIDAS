@@ -1,6 +1,8 @@
 import streamlit as st
 import plotly.graph_objects as go
 import random
+import base64
+from pathlib import Path
 
 
 @st.dialog("공장 상세 정보", width="large")
@@ -15,47 +17,109 @@ def factory_detail(
     sparkline_fig,
     temp_predict_fig,
     temp_trend_fig,
+    issue_qr_token,
 ):
     sc = status_color(f["status"])
     sb = status_bg(f["status"])
     st_txt = status_text(f["status"])
     maint = get_maintenance_info(f["factory_id"])
+    qr_icon_path = Path(__file__).resolve().parents[2] / "assets" / "qr.png"
+    qr_icon_base64 = base64.b64encode(qr_icon_path.read_bytes()).decode()
 
-    st.markdown(f"""
-    <div style="display:flex;align-items:center; gap:15px; margin-bottom:-10px">
-        <div style="font-size:17px;font-weight:500;color:#1a1a2e">
-            {f['name']}
-            <span style="font-size:13px;color:#888780;font-weight:400">&nbsp;{f['id']}</span>
+    title_col, qr_col = st.columns([8, 1])
+
+    with title_col:
+        st.markdown(f"""
+        <div style="display:flex;align-items:center; gap:15px; margin-bottom:-10px">
+            <div style="font-size:20px;font-weight:500;color:#1a1a2e">
+                {f['name']}
+                <span style="font-size:13px;color:#888780;font-weight:400">&nbsp;{f['id']}</span>
+            </div>
+            <span class="badge" style="background:{sb};color:{sc};font-size:13px;padding:5px 14px;">
+                {st_txt}
+            </span>
         </div>
-        <span class="badge" style="background:{sb};color:{sc};font-size:13px;padding:5px 14px;">
-            {st_txt}
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown("""
+    <style>
+    .st-key-qr_popover_wrap {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: -6px;
+    }
+
+    .st-key-qr_popover_wrap div[data-testid="stPopover"] button {
+        white-space: nowrap !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    with qr_col:
+        with st.container(key=f"qr_popover_wrap_{f['factory_id']}"):
+                with st.popover("QR 코드"):
+                    qr_key = f"qr_data_{f['factory_id']}"
+                    qr_data = st.session_state.get(qr_key)
+
+                    button_area = st.empty()
+
+                    if not qr_data:
+                        with button_area:
+                            clicked = st.button("QR 코드 발급", key=f"qr_issue_{f['factory_id']}")
+
+                        if clicked:
+                            with st.spinner(""):
+                                result = issue_qr_token(f["factory_id"])
+
+                            if result and result.get("success"):
+                                st.session_state[qr_key] = result["data"]
+                                qr_data = result["data"]
+                                button_area.empty()
+                            else:
+                                st.error("QR 발급에 실패했습니다.")
+                                st.write(result)
+
+                    if qr_data:
+                        st.success("발급 완료")
+                        st.image(qr_data["qr_code_base64"], width=160)
+                        st.markdown(f"""
+                        <div style="
+                            width: 280px;
+                            font-size: 15px;
+                            word-break: break-all;
+                            line-height: 1.5;
+                            background: #f8f8f6;
+                            border: 1px solid #e0e3ea;
+                            border-radius: 6px;
+                            padding: 8px;
+                        ">
+                            {qr_data["readonly_url"]}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.caption(f"만료 시간: {qr_data['expires_at']}")
+    st.markdown(
+    "<hr style='margin:-20px 0 20px 0; border:none; border-top:1px solid #e0e3ea;'>",
+    unsafe_allow_html=True
+)
 
     dm1, dm2, dm3, dm4 = st.columns(4)
 
     sensor_logs = get_sensor_logs(f["factory_id"])
 
-    hdata = [log["temperature_c"] for log in sensor_logs]
-    phdata = [log["humidity_pct"] for log in sensor_logs]
-    pwdata = [log["pwm_pct"] for log in sensor_logs]
+    hdata = [log["temperature_c"] for log in sensor_logs if log.get("temperature_c") is not None]
+    phdata = [log["humidity_pct"] for log in sensor_logs if log.get("humidity_pct") is not None]
 
     if not hdata:
         hdata = [f["temp"]]
     if not phdata:
         phdata = [f["hum"]]
-    if not pwdata:
-        pwdata = [f["power"]]
 
-    stock_pct = round(f["current_stock_units"] / f["capacity_units"] * 100)
+    stock_pct = round(f["current_stock_units"] / f["capacity_units"] * 100) if f.get("capacity_units") else 0
 
     for idx, (col, label, val, unit, sub, clr, spark) in enumerate([
-        (dm1, "현재 온도", f"{f['temp']:.1f}", "°C", f"목표 {f['target']}°C", sc, hdata),
+        (dm1, "현재 온도", f"{f['temp']:.1f}", "°C", f"목표 {round(f['target'], 1)}°C", sc, hdata),
         (dm2, "현재 습도", f"{f['hum']}", "%RH", "기준 60~75%", "#1d9e75", phdata),
-        (dm3, "PWM 출력", f"{f['power']}", "%", "현재 출력", "#ba7517", pwdata),
+        (dm3, "재고", f"{f['current_stock_units']}", "개", f"용량 {f['capacity_units']}개", "#ba7517", hdata),
     ]):
         with col:
             st.markdown(f"""
@@ -71,7 +135,7 @@ def factory_detail(
             with st.container(key=f"detail_metric_chart_{idx}"):
                 st.plotly_chart(
                     sparkline_fig(spark, clr, 50),
-                    width="stretch",
+                    use_container_width=True,
                     config={"displayModeBar": False}
                 )
 
@@ -104,7 +168,7 @@ def factory_detail(
             )
 
             if pred_fig:
-                st.plotly_chart(pred_fig, width="stretch", config={"displayModeBar": False})
+                st.plotly_chart(pred_fig, use_container_width=True, config={"displayModeBar": False})
             else:
                 st.markdown(
                     '<div style="font-size:12px;color:#6e6e6e;padding:4px 0 10px">온도 예측 데이터 없음</div>',
@@ -116,7 +180,7 @@ def factory_detail(
                 '<div class="section-label" style="margin-top:10px">온도 추이 (최근 1시간)</div>',
                 unsafe_allow_html=True
             )
-            st.plotly_chart(temp_trend_fig(f), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(temp_trend_fig(f), use_container_width=True, config={"displayModeBar": False})
 
     # 설비 상태
     with tab_equip:
@@ -194,7 +258,14 @@ def factory_detail(
                     unsafe_allow_html=True
                 )
             else:
-                for alarm in f["alarms"]:
+                show_all_key = f"alarm_show_all_{f['factory_id']}"
+                if show_all_key not in st.session_state:
+                    st.session_state[show_all_key] = False
+
+                alarms = f["alarms"]
+                visible = alarms if st.session_state[show_all_key] else alarms[:5]
+
+                for alarm in visible:
                     lc = "#854f0b" if alarm["level"] == "WARNING" else "#185fa5"
                     lb = "#faeeda" if alarm["level"] == "WARNING" else "#dbeeff"
 
@@ -208,6 +279,14 @@ def factory_detail(
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+
+                if len(alarms) > 5:
+                    if st.session_state[show_all_key]:
+                        if st.button("접기", key=f"alarm_fold_{f['factory_id']}"):
+                            st.session_state[show_all_key] = False
+                    else:
+                        if st.button(f"더보기 ({len(alarms) - 5}개 더)", key=f"alarm_more_{f['factory_id']}"):
+                            st.session_state[show_all_key] = True
 
         with row3_right:
             st.markdown(

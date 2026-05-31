@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # backend/services/readonly_service.py
 # QR 읽기 전용 토큰 발급 및 조회 로직
 #
@@ -93,7 +95,8 @@ async def issue_readonly_token(
     )
 
     frontend_base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:8501").strip()
-    readonly_url = f"{frontend_base_url}/?token={token}"
+    readonly_url = f"{frontend_base_url}/qr_dash?token={token}"
+    #readonly_url = f"{frontend_base_url}/readonly?token={token}"
     qr_code_base64 = _generate_qr_code_base64(readonly_url)
 
     return {

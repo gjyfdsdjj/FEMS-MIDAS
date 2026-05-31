@@ -45,7 +45,7 @@ cd ..
 python -m uvicorn backend.main:app --reload
 ```
 
-### Edge (RPi5)
+### Edge (RPi4)
 
 ```bash
 # RPi5에서 실행
@@ -64,7 +64,7 @@ python edge/main.py
 
 ## .env 설정 항목
 
-| 항목 | 백엔드 PC | RPi5 |
+| 항목 | 백엔드 PC | RPi4 |
 |---|---|---|
 | `DATABASE_URL` | Supabase 연결 문자열 | 불필요 |
 | `MQTT_HOST` | `localhost` | 백엔드 PC의 로컬 IP (예: `192.168.0.10`) |
@@ -73,10 +73,3 @@ python edge/main.py
 | `FACTORY_IDS` | 불필요 | `1,2` 또는 `3,4` |
 
 ---
-
-## 로컬 PC IP 확인 방법 (Windows)
-
-```bash
-ipconfig
-# IPv4 Address 항목 확인
-```

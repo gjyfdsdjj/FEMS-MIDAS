@@ -1,24 +1,61 @@
-# backend/services/control_service.py
-# 수동 제어 처리 로직
-#
-# - execute_manual_control(request: ManualControlRequest)
-#     1. 공장 존재 여부 확인
-#     2. action 유형별 처리:
-#        STOP         → factories.manual_stop=True 플래그 설정
-#        START        → manual_stop=False, 스케줄러 재트리거
-#        SET_PWM      → value(0~100) 유효성 확인 후 MQTT 발행
-#        SET_TARGET_TEMP → 온도 범위 검증 후 MQTT 발행
-#        SWITCH_AUTO  → control_mode=AUTO 변경
-#        SWITCH_MANUAL→ control_mode=MANUAL 변경
-#        RESET        → 공장 상태 초기화
-#     3. MQTT publisher.publish_command 호출
-#     4. control_logs 기록
-#
-# - execute_all_stop(reason)
-#     모든 공장에 STOP 일괄 처리
-#
-# - execute_all_start(reason)
-#     manual_stop=True 공장 제외하고 START
-#
-# - get_control_logs(factory_id?, limit, cursor)
-#     control_logs 커서 페이지네이션
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+
+from database.models import ControlLog
+
+
+async def log_control_action(
+    db: AsyncSession,
+    *,
+    factory_id: int,
+    node_id: str,
+    action: str,
+    value: float | None = None,
+    reason: str | None = None,
+    requested_by: str = "streamlit",
+    result: str | None = None,
+) -> None:
+    db.add(ControlLog(
+        factory_id=factory_id,
+        node_id=node_id,
+        action=action,
+        value=value,
+        reason=reason,
+        requested_by=requested_by,
+        result=result,
+        issued_at=datetime.now(timezone.utc),
+    ))
+    await db.commit()
+
+
+async def get_control_logs(
+    db: AsyncSession,
+    factory_id: int | None = None,
+    limit: int = 50,
+    cursor: int | None = None,
+) -> list[dict]:
+    q = select(ControlLog).order_by(desc(ControlLog.issued_at)).limit(limit)
+    if factory_id is not None:
+        q = q.where(ControlLog.factory_id == factory_id)
+    if cursor is not None:
+        q = q.where(ControlLog.id < cursor)
+    result = await db.execute(q)
+    rows = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "factory_id": r.factory_id,
+            "node_id": r.node_id,
+            "action": r.action,
+            "value": r.value,
+            "reason": r.reason,
+            "requested_by": r.requested_by,
+            "result": r.result,
+            "issued_at": r.issued_at.isoformat() if r.issued_at else None,
+        }
+        for r in rows
+    ]
