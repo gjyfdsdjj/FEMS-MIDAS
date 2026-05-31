@@ -18,6 +18,27 @@ INTERVAL = 5  # 센서 읽기 주기 (초)
 PELTIER_DUTY = float(os.getenv("PELTIER_DUTY", "30.0"))
 PELTIER_CHECK_INTERVAL = 5  # 냉각 중 센서 확인 주기 (초)
 
+_DEFAULT_DHT22_PINS = {1: 4, 2: 17}
+_DEFAULT_PELTIER_PINS = {
+    1: dict(rpwm=18, lpwm=19, r_en=20, l_en=21, fan=23),
+    2: dict(rpwm=12, lpwm=13, r_en=16, l_en=26, fan=6),
+}
+
+
+def _get_dht22_pin(factory_id: int) -> int:
+    return int(os.getenv(f"FACTORY_{factory_id}_DHT22_PIN", _DEFAULT_DHT22_PINS.get(factory_id, 4)))
+
+
+def _get_peltier_pins(factory_id: int) -> Pins:
+    d = _DEFAULT_PELTIER_PINS.get(factory_id, _DEFAULT_PELTIER_PINS[1])
+    return Pins(
+        rpwm=int(os.getenv(f"FACTORY_{factory_id}_PELTIER_RPWM", d["rpwm"])),
+        lpwm=int(os.getenv(f"FACTORY_{factory_id}_PELTIER_LPWM", d["lpwm"])),
+        r_en=int(os.getenv(f"FACTORY_{factory_id}_PELTIER_R_EN", d["r_en"])),
+        l_en=int(os.getenv(f"FACTORY_{factory_id}_PELTIER_L_EN", d["l_en"])),
+        fan=int(os.getenv(f"FACTORY_{factory_id}_PELTIER_FAN", d["fan"])),
+    )
+
 running = True
 _cooling_threads: dict[int, threading.Thread] = {}
 _cooling_stop_events: dict[int, threading.Event] = {}
@@ -116,8 +137,9 @@ def _run_start_command(factory_id: int, payload: dict, stop_event: threading.Eve
             pass
 
 
-def make_command_handler(sensors: dict[int, DHT22Reader], controller: PeltierController):
+def make_command_handler(sensors: dict[int, DHT22Reader], controllers: dict[int, PeltierController]):
     def handle_command(factory_id: int, action: str, payload: dict):
+        controller = controllers.get(factory_id)
         if controller is None:
             print(f"[CMD] Peltier 초기화 안 됨, 명령 무시: {action}")
             return
@@ -167,23 +189,29 @@ def main():
     mqtt.connect()
     time.sleep(1)
 
-    sensors = {fid: DHT22Reader(fid) for fid in FACTORY_IDS}
+    sensors = {fid: DHT22Reader(fid, bcm_pin=_get_dht22_pin(fid)) for fid in FACTORY_IDS}
 
-    controller = PeltierController(pins=Pins())
-    try:
-        controller.setup()
-    except Exception as e:
-        print(f"[Peltier] 초기화 실패: {e}")
-        controller = None
+    controllers: dict[int, PeltierController] = {}
+    for fid in FACTORY_IDS:
+        c = PeltierController(pins=_get_peltier_pins(fid))
+        try:
+            c.setup()
+            controllers[fid] = c
+            print(f"[Peltier] factory={fid} 초기화 완료")
+        except Exception as e:
+            print(f"[Peltier] factory={fid} 초기화 실패: {e}")
 
-    mqtt.on_command = make_command_handler(sensors, controller)
+    mqtt.on_command = make_command_handler(sensors, controllers)
 
-    hcsr04 = HCSR04Reader()
-    try:
-        hcsr04.setup()
-    except Exception as e:
-        print(f"[HC-SR04] 초기화 실패: {e}")
-        hcsr04 = None
+    hcsr04s: dict[int, HCSR04Reader] = {}
+    for fid in FACTORY_IDS:
+        h = HCSR04Reader(factory_id=fid)
+        try:
+            h.setup()
+            hcsr04s[fid] = h
+            print(f"[HC-SR04] factory={fid} 초기화 완료 (TRIG={h.trig}, ECHO={h.echo})")
+        except Exception as e:
+            print(f"[HC-SR04] factory={fid} 초기화 실패: {e}")
 
     try:
         while running:
@@ -199,8 +227,8 @@ def main():
                     )
                 else:
                     print(f"공장 {factory_id} 센서 읽기 실패, 건너뜀")
-            if hcsr04:
-                hcsr04.check_and_log()
+                if factory_id in hcsr04s:
+                    hcsr04s[factory_id].check_and_log()
             time.sleep(INTERVAL)
     finally:
         for event in _cooling_stop_events.values():
@@ -212,10 +240,11 @@ def main():
                 print(f"[Peltier] factory={factory_id} 타임아웃, 강제 종료")
         for sensor in sensors.values():
             sensor.close()
-        if controller:
-            controller.cleanup()
-        if hcsr04:
-            hcsr04.cleanup()
+        for fid, c in controllers.items():
+            print(f"[Peltier] factory={fid} GPIO 정리 중...")
+            c.cleanup()
+        for h in hcsr04s.values():
+            h.cleanup()
         mqtt.disconnect()
         print("Edge 노드 종료 완료")
 

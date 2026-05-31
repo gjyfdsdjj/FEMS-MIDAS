@@ -1,20 +1,29 @@
+import os
 import time
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 
 try:
     import RPi.GPIO as GPIO
 except ImportError:
     GPIO = None
 
-TRIG_PIN = 5
-ECHO_PIN = 6
+load_dotenv()
+
 DETECT_DISTANCE_CM = 20
+
+_DEFAULT_PINS = {
+    1: (5, 22),
+    2: (24, 25),
+}
 
 
 class HCSR04Reader:
-    def __init__(self, trig: int = TRIG_PIN, echo: int = ECHO_PIN):
-        self.trig = trig
-        self.echo = echo
+    def __init__(self, factory_id: int = 1, trig: int = None, echo: int = None):
+        self.factory_id = factory_id
+        default_trig, default_echo = _DEFAULT_PINS.get(factory_id, (5, 22))
+        self.trig = trig if trig is not None else int(os.getenv(f"FACTORY_{factory_id}_HCSR04_TRIG", default_trig))
+        self.echo = echo if echo is not None else int(os.getenv(f"FACTORY_{factory_id}_HCSR04_ECHO", default_echo))
         self._setup_done = False
 
     def setup(self) -> None:
@@ -53,7 +62,7 @@ class HCSR04Reader:
         if distance is None:
             return
         if distance <= DETECT_DISTANCE_CM:
-            print(f"[HC-SR04] 물체 감지: {distance}cm (기준 {DETECT_DISTANCE_CM}cm 이내) @ {datetime.now(timezone.utc).isoformat()}")
+            print(f"[HC-SR04] factory={self.factory_id} 물체 감지: {distance}cm (기준 {DETECT_DISTANCE_CM}cm 이내) @ {datetime.now(timezone.utc).isoformat()}")
 
     def cleanup(self) -> None:
         if not self._setup_done:
